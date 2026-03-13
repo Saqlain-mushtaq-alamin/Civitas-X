@@ -1,0 +1,30 @@
+# Build outputs
+build/
+build-nmake/
+build-clean/
+out/
+bin/
+lib/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+
+# IDE
+.vscode/.browse.VC.db*
+.vscode/ipch/
+
+# OS
+.DS_Store
+Thumbs.db

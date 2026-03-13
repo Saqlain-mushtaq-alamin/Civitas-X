@@ -1,0 +1,9 @@
+{
+    "name": "civitas-x",
+    "version-string": "0.1.0",
+    "description": "2D autonomous city simulation with AI-driven cars and NPC lifecycle.",
+    "dependencies": [
+        "freeglut",
+        "glm"
+    ]
+}

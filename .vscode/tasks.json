@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CMake Configure (NMake + vcpkg)",
+            "type": "shell",
+            "command": "call \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake -S . -B build-nmake -G \"NMake Makefiles\" -DCMAKE_TOOLCHAIN_FILE=%USERPROFILE%\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+            "options": {
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": [
+                        "/d",
+                        "/c"
+                    ]
+                }
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "CMake Build (NMake)",
+            "type": "shell",
+            "command": "call \"%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build build-nmake",
+            "options": {
+                "shell": {
+                    "executable": "C:\\Windows\\System32\\cmd.exe",
+                    "args": [
+                        "/d",
+                        "/c"
+                    ]
+                }
+            },
+            "group": "build",
+            "problemMatcher": [
+                "$msCompile"
+            ]
+        },
+        {
+            "label": "Run Civitas-X",
+            "type": "shell",
+            "command": "build-nmake/civitas_x.exe",
+            "dependsOn": "CMake Build (NMake)",
+            "problemMatcher": []
+        }
+    ]
+}
