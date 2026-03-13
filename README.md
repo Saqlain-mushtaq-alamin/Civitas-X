@@ -53,15 +53,35 @@ $env:VCPKG_ROOT = "$env:USERPROFILE\\vcpkg"
 ### 2) Configure and build
 From repository root:
 
+Option A: CMake commands
+
 ```powershell
-cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-cmake --build build --config Release
+cmd /d /c 'call "%ProgramFiles(x86)%\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 && cmake -S . -B build-nmake -G "NMake Makefiles" -DCMAKE_TOOLCHAIN_FILE=%USERPROFILE%\vcpkg\scripts\buildsystems\vcpkg.cmake && cmake --build build-nmake'
+```
+
+Option B: Makefile shortcuts
+
+```powershell
+make build
 ```
 
 ### 3) Run
 
 ```powershell
-.\build\Release\civitas_x.exe
+$env:PATH = "$PWD\build-nmake\vcpkg_installed\x64-windows\bin;$env:PATH"
+.\build-nmake\civitas_x.exe
+```
+
+Or with Makefile shortcut:
+
+```powershell
+make run
+```
+
+Run without blocking the current terminal:
+
+```powershell
+make run-bg
 ```
 
 ## Repository Layout
