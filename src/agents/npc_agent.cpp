@@ -11,7 +11,14 @@ namespace civitasx
             NpcAgent npc;
             npc.id = id;
             npc.position = spawnPosition;
-            npc.mood = 1.0f;
+            npc.money = 100;
+            npc.state = NpcState::Sleeping;
+            npc.home = spawnPosition;
+            npc.work = spawnPosition;
+            npc.food = spawnPosition;
+            npc.target = spawnPosition;
+            npc.cycleStage = 0;
+            npc.dwellSeconds = 0.0f;
             return npc;
         }
 

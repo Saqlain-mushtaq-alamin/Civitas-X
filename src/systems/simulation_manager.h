@@ -22,6 +22,7 @@ namespace civitasx
             void update(float deltaSeconds);
 
             const std::vector<agents::CarAgent> &cars() const;
+            const std::vector<agents::NpcAgent> &npcs() const;
             const std::vector<glm::vec2> &waypoints() const;
             const world::CityMapConfig &cityMap() const;
 
