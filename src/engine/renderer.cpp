@@ -313,12 +313,54 @@ namespace civitasx
 
             void drawPark(float x, float y, float size)
             {
-                glColor3f(0.20f, 0.60f, 0.25f);
-                drawPoints(graphics::buildFilledRectPoints(
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(size),
-                    static_cast<int>(size)));
+                const int ix = static_cast<int>(x);
+                const int iy = static_cast<int>(y);
+                const int isize = static_cast<int>(size);
+
+                // Base grass.
+                glColor3f(0.22f, 0.58f, 0.26f);
+                drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                // Inner lawn patch for depth.
+                glColor3f(0.30f, 0.66f, 0.32f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 3, iy + 3, isize - 6, isize - 6));
+
+                // Curved-ish walking path made from two connected strips.
+                glColor3f(0.78f, 0.74f, 0.63f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + (isize / 2) - 2, isize - 4, 4));
+                drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 2, iy + 2, 4, isize - 4));
+
+                // Small pond.
+                glColor3f(0.28f, 0.62f, 0.86f);
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 11, iy + 4, 6, 4));
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 10, iy + 8, 4, 2));
+
+                // Tree canopies (circles from midpoint algorithm).
+                glColor3f(0.14f, 0.44f, 0.19f);
+                const std::vector<glm::vec2> tree1 = graphics::buildCircleFanVertices(
+                    {static_cast<float>(ix + 7), static_cast<float>(iy + 8)}, 3.0f, 16);
+                drawPoints(graphics::buildFilledRectPoints(ix + 5, iy + 10, 2, 4));
+                glBegin(GL_TRIANGLE_FAN);
+                for (const glm::vec2 &vertex : tree1)
+                {
+                    glVertex2f(vertex.x, vertex.y);
+                }
+                glEnd();
+
+                glColor3f(0.16f, 0.48f, 0.21f);
+                const std::vector<glm::vec2> tree2 = graphics::buildCircleFanVertices(
+                    {static_cast<float>(ix + isize - 7), static_cast<float>(iy + isize - 8)}, 3.0f, 16);
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 9, iy + isize - 6, 2, 4));
+                glBegin(GL_TRIANGLE_FAN);
+                for (const glm::vec2 &vertex : tree2)
+                {
+                    glVertex2f(vertex.x, vertex.y);
+                }
+                glEnd();
+
+                // Flower bed accent.
+                glColor3f(0.92f, 0.38f, 0.56f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + isize - 7, 5, 2));
             }
 
         } // namespace
