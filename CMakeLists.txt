@@ -10,13 +10,29 @@ option(CIVITASX_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 add_executable(civitas_x
     src/main.cpp
     src/app.cpp
-    src/world.cpp
-    src/renderer2d.cpp
+    src/engine/renderer.cpp
+    src/engine/camera.cpp
+    src/engine/input.cpp
+    src/world/city_map.cpp
+    src/world/road_network.cpp
+    src/world/tile_system.cpp
+    src/agents/car_agent.cpp
+    src/agents/npc_agent.cpp
+    src/ai/pathfinding.cpp
+    src/ai/behavior_system.cpp
+    src/ai/decision_logic.cpp
+    src/systems/traffic_system.cpp
+    src/systems/economy_system.cpp
+    src/systems/simulation_manager.cpp
+    src/graphics/shape_drawer.cpp
+    src/graphics/algorithms.cpp
+    src/graphics/transformation.cpp
 )
 
 target_include_directories(civitas_x
     PRIVATE
         include
+        src
 )
 
 find_package(OpenGL REQUIRED)

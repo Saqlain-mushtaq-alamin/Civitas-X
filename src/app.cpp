@@ -1,5 +1,7 @@
 #include "civitasx/app.hpp"
 
+#include "engine/input.h"
+
 #include <GL/freeglut.h>
 
 namespace civitasx
@@ -23,7 +25,8 @@ namespace civitasx
 
         glClearColor(0.04f, 0.06f, 0.08f, 1.0f);
 
-        world_.initialize();
+        simulation_.initialize();
+        engine::registerInputCallbacks();
 
         glutDisplayFunc(&App::displayCallback);
         glutReshapeFunc(&App::reshapeCallback);
@@ -64,7 +67,7 @@ namespace civitasx
 
     void App::onDisplay()
     {
-        renderer_.render(world_, width_, height_);
+        renderer_.render(simulation_, width_, height_);
         glutSwapBuffers();
     }
 
@@ -81,7 +84,7 @@ namespace civitasx
         const float delta = now - lastTimeSeconds_;
         lastTimeSeconds_ = now;
 
-        world_.update((delta > 0.0f) ? delta : 0.0f);
+        simulation_.update((delta > 0.0f) ? delta : 0.0f);
         glutPostRedisplay();
     }
 
