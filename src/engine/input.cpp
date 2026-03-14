@@ -26,6 +26,10 @@ namespace civitasx
                 int mouseX = 0;
                 int mouseY = 0;
 
+                bool hasPendingLeftClick = false;
+                int clickX = 0;
+                int clickY = 0;
+
                 float velocityX = 0.0f;
                 float velocityY = 0.0f;
 
@@ -259,6 +263,13 @@ namespace civitasx
 
             void onMouseButton(int button, int state, int x, int y)
             {
+                if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+                {
+                    g_navigation.hasPendingLeftClick = true;
+                    g_navigation.clickX = x;
+                    g_navigation.clickY = y;
+                }
+
                 setMousePosition(x, y);
 
                 if (state != GLUT_DOWN)
@@ -413,6 +424,19 @@ namespace civitasx
             state.centerY = g_navigation.centerY;
             state.zoom = g_navigation.zoom;
             return state;
+        }
+
+        bool consumeLeftClick(int &x, int &y)
+        {
+            if (!g_navigation.hasPendingLeftClick)
+            {
+                return false;
+            }
+
+            x = g_navigation.clickX;
+            y = g_navigation.clickY;
+            g_navigation.hasPendingLeftClick = false;
+            return true;
         }
 
     } // namespace engine

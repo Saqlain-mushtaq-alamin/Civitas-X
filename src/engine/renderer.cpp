@@ -4,8 +4,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <random>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include <glm/geometric.hpp>
@@ -96,6 +99,7 @@ namespace civitasx
             };
 
             NpcRuntimeState g_npcRuntime;
+            int g_selectedNpcId = -1;
 
             void drawPoints(const std::vector<glm::ivec2> &points);
 
@@ -104,6 +108,182 @@ namespace civitasx
                 return {
                     static_cast<float>(col * tilePixels + (tilePixels / 2)),
                     static_cast<float>(row * tilePixels + (tilePixels / 2))};
+            }
+
+            glm::vec2 snapToRoadside(
+                const world::CityMap &map,
+                int tilePixels,
+                const glm::vec2 &position,
+                const glm::vec2 &direction,
+                int stableSideSeed)
+            {
+                if (tilePixels <= 0 || map.rows() == 0U || map.cols() == 0U)
+                {
+                    return position;
+                }
+
+                const int col = std::clamp(static_cast<int>(position.x / static_cast<float>(tilePixels)), 0, static_cast<int>(map.cols()) - 1);
+                const int row = std::clamp(static_cast<int>(position.y / static_cast<float>(tilePixels)), 0, static_cast<int>(map.rows()) - 1);
+
+                int bestRoadRow = -1;
+                int bestRoadCol = -1;
+                float bestDistance2 = std::numeric_limits<float>::max();
+
+                // Search nearby road tiles and pick the nearest one.
+                for (int dr = -2; dr <= 2; ++dr)
+                {
+                    for (int dc = -2; dc <= 2; ++dc)
+                    {
+                        const int rr = row + dr;
+                        const int cc = col + dc;
+                        if (rr < 0 || cc < 0 || rr >= static_cast<int>(map.rows()) || cc >= static_cast<int>(map.cols()))
+                        {
+                            continue;
+                        }
+                        if (!isRoadTile(map, rr, cc))
+                        {
+                            continue;
+                        }
+
+                        const glm::vec2 center = tileCenter(rr, cc, tilePixels);
+                        const glm::vec2 delta = center - position;
+                        const float distance2 = (delta.x * delta.x) + (delta.y * delta.y);
+                        if (distance2 < bestDistance2)
+                        {
+                            bestDistance2 = distance2;
+                            bestRoadRow = rr;
+                            bestRoadCol = cc;
+                        }
+                    }
+                }
+
+                if (bestRoadRow < 0 || bestRoadCol < 0)
+                {
+                    return position;
+                }
+
+                const float laneInset = static_cast<float>(tilePixels) * 0.28f;
+                const float leftOrTop = laneInset;
+                const float rightOrBottom = static_cast<float>(tilePixels) - laneInset;
+                const bool useFirstSide = (stableSideSeed % 2) == 0;
+
+                float localX = position.x - static_cast<float>(bestRoadCol * tilePixels);
+                float localY = position.y - static_cast<float>(bestRoadRow * tilePixels);
+                localX = std::clamp(localX, 0.0f, static_cast<float>(tilePixels));
+                localY = std::clamp(localY, 0.0f, static_cast<float>(tilePixels));
+
+                const bool moveHorizontally = std::abs(direction.x) >= std::abs(direction.y);
+                if (moveHorizontally)
+                {
+                    localY = useFirstSide ? leftOrTop : rightOrBottom;
+                }
+                else
+                {
+                    localX = useFirstSide ? leftOrTop : rightOrBottom;
+                }
+
+                const glm::vec2 snapped{
+                    static_cast<float>(bestRoadCol * tilePixels) + localX,
+                    static_cast<float>(bestRoadRow * tilePixels) + localY};
+
+                // Blend instead of hard snapping to keep motion smooth.
+                return glm::mix(position, snapped, 0.45f);
+            }
+
+            bool findRoadsideAccessAnchor(
+                const world::CityMap &map,
+                int tilePixels,
+                const glm::vec2 &destination,
+                int stableSideSeed,
+                glm::vec2 &outAnchor)
+            {
+                if (tilePixels <= 0 || map.rows() == 0U || map.cols() == 0U)
+                {
+                    return false;
+                }
+
+                const int destCol = std::clamp(static_cast<int>(destination.x / static_cast<float>(tilePixels)), 0, static_cast<int>(map.cols()) - 1);
+                const int destRow = std::clamp(static_cast<int>(destination.y / static_cast<float>(tilePixels)), 0, static_cast<int>(map.rows()) - 1);
+
+                int bestRoadRow = -1;
+                int bestRoadCol = -1;
+                float bestDistance2 = std::numeric_limits<float>::max();
+
+                // Find the closest road around the destination to use as access point.
+                for (int dr = -4; dr <= 4; ++dr)
+                {
+                    for (int dc = -4; dc <= 4; ++dc)
+                    {
+                        const int rr = destRow + dr;
+                        const int cc = destCol + dc;
+                        if (rr < 0 || cc < 0 || rr >= static_cast<int>(map.rows()) || cc >= static_cast<int>(map.cols()))
+                        {
+                            continue;
+                        }
+                        if (!isRoadTile(map, rr, cc))
+                        {
+                            continue;
+                        }
+
+                        const glm::vec2 center = tileCenter(rr, cc, tilePixels);
+                        const glm::vec2 delta = destination - center;
+                        const float distance2 = (delta.x * delta.x) + (delta.y * delta.y);
+                        if (distance2 < bestDistance2)
+                        {
+                            bestDistance2 = distance2;
+                            bestRoadRow = rr;
+                            bestRoadCol = cc;
+                        }
+                    }
+                }
+
+                if (bestRoadRow < 0 || bestRoadCol < 0)
+                {
+                    return false;
+                }
+
+                const bool hasHorizontal =
+                    isRoadTile(map, bestRoadRow, bestRoadCol - 1) ||
+                    isRoadTile(map, bestRoadRow, bestRoadCol + 1);
+                const bool hasVertical =
+                    isRoadTile(map, bestRoadRow - 1, bestRoadCol) ||
+                    isRoadTile(map, bestRoadRow + 1, bestRoadCol);
+
+                const float laneInset = static_cast<float>(tilePixels) * 0.28f;
+                const bool useFirstSide = (stableSideSeed % 2) == 0;
+                float localX = static_cast<float>(tilePixels) * 0.5f;
+                float localY = static_cast<float>(tilePixels) * 0.5f;
+
+                if (hasHorizontal && !hasVertical)
+                {
+                    localY = useFirstSide ? laneInset : static_cast<float>(tilePixels) - laneInset;
+                    localX = std::clamp(destination.x - static_cast<float>(bestRoadCol * tilePixels), 0.0f, static_cast<float>(tilePixels));
+                }
+                else if (hasVertical && !hasHorizontal)
+                {
+                    localX = useFirstSide ? laneInset : static_cast<float>(tilePixels) - laneInset;
+                    localY = std::clamp(destination.y - static_cast<float>(bestRoadRow * tilePixels), 0.0f, static_cast<float>(tilePixels));
+                }
+                else
+                {
+                    const glm::vec2 center = tileCenter(bestRoadRow, bestRoadCol, tilePixels);
+                    const glm::vec2 delta = destination - center;
+                    if (std::abs(delta.x) >= std::abs(delta.y))
+                    {
+                        localY = useFirstSide ? laneInset : static_cast<float>(tilePixels) - laneInset;
+                        localX = std::clamp(destination.x - static_cast<float>(bestRoadCol * tilePixels), 0.0f, static_cast<float>(tilePixels));
+                    }
+                    else
+                    {
+                        localX = useFirstSide ? laneInset : static_cast<float>(tilePixels) - laneInset;
+                        localY = std::clamp(destination.y - static_cast<float>(bestRoadRow * tilePixels), 0.0f, static_cast<float>(tilePixels));
+                    }
+                }
+
+                outAnchor = {
+                    static_cast<float>(bestRoadCol * tilePixels) + localX,
+                    static_cast<float>(bestRoadRow * tilePixels) + localY};
+                return true;
             }
 
             bool assignRouteForCar(std::size_t carIndex, int startNode)
@@ -149,6 +329,172 @@ namespace civitasx
                 }
 
                 return true;
+            }
+
+            const char *npcStateLabel(agents::NpcState state)
+            {
+                switch (state)
+                {
+                case agents::NpcState::Sleeping:
+                    return "Sleeping";
+                case agents::NpcState::Working:
+                    return "Working";
+                case agents::NpcState::Walking:
+                    return "Walking";
+                case agents::NpcState::Traveling:
+                    return "Traveling";
+                default:
+                    return "Unknown";
+                }
+            }
+
+            const char *npcStageLabel(int stage)
+            {
+                switch (stage)
+                {
+                case 0:
+                    return "Home -> Work";
+                case 1:
+                    return "Work -> Park";
+                case 2:
+                    return "Park -> Home";
+                default:
+                    return "Unknown";
+                }
+            }
+
+            void drawHudText(float x, float y, const std::string &text, void *font = GLUT_BITMAP_8_BY_13)
+            {
+                glRasterPos2f(x, y);
+                for (char c : text)
+                {
+                    glutBitmapCharacter(font, c);
+                }
+            }
+
+            agents::NpcAgent *findNpcById(int npcId)
+            {
+                for (agents::NpcAgent &npc : g_npcRuntime.npcs)
+                {
+                    if (npc.id == npcId)
+                    {
+                        return &npc;
+                    }
+                }
+                return nullptr;
+            }
+
+            const agents::NpcAgent *findNpcById(int npcId, const std::vector<agents::NpcAgent> &npcs)
+            {
+                for (const agents::NpcAgent &npc : npcs)
+                {
+                    if (npc.id == npcId)
+                    {
+                        return &npc;
+                    }
+                }
+                return nullptr;
+            }
+
+            glm::vec2 screenToWorldPoint(
+                int mouseX,
+                int mouseY,
+                int viewportWidth,
+                int viewportHeight,
+                const CameraState &camera,
+                float viewHalfWidth,
+                float viewHalfHeight)
+            {
+                const float safeWidth = static_cast<float>((viewportWidth <= 0) ? 1 : viewportWidth);
+                const float safeHeight = static_cast<float>((viewportHeight <= 0) ? 1 : viewportHeight);
+
+                const float left = camera.centerX - viewHalfWidth;
+                const float right = camera.centerX + viewHalfWidth;
+                const float top = camera.centerY + viewHalfHeight;
+                const float bottom = camera.centerY - viewHalfHeight;
+
+                const float nx = static_cast<float>(mouseX) / safeWidth;
+                const float ny = static_cast<float>(mouseY) / safeHeight;
+
+                const float worldX = left + (nx * (right - left));
+                const float worldY = top - (ny * (top - bottom));
+                return {worldX, worldY};
+            }
+
+            void drawNpcInspectorOverlay(int viewportWidth, int viewportHeight)
+            {
+                if (g_selectedNpcId < 0)
+                {
+                    return;
+                }
+
+                const agents::NpcAgent *selected = findNpcById(g_selectedNpcId, g_npcRuntime.npcs);
+                if (selected == nullptr)
+                {
+                    g_selectedNpcId = -1;
+                    return;
+                }
+
+                const float panelX = 14.0f;
+                const float panelY = 14.0f;
+                const float panelW = 290.0f;
+                const float panelH = 136.0f;
+
+                glMatrixMode(GL_PROJECTION);
+                glPushMatrix();
+                glLoadIdentity();
+                glOrtho(0.0, static_cast<double>(viewportWidth), static_cast<double>(viewportHeight), 0.0, -1.0, 1.0);
+
+                glMatrixMode(GL_MODELVIEW);
+                glPushMatrix();
+                glLoadIdentity();
+
+                glColor4f(0.04f, 0.06f, 0.08f, 0.92f);
+                glBegin(GL_QUADS);
+                glVertex2f(panelX, panelY);
+                glVertex2f(panelX + panelW, panelY);
+                glVertex2f(panelX + panelW, panelY + panelH);
+                glVertex2f(panelX, panelY + panelH);
+                glEnd();
+
+                glColor3f(0.32f, 0.74f, 0.94f);
+                glBegin(GL_LINE_LOOP);
+                glVertex2f(panelX, panelY);
+                glVertex2f(panelX + panelW, panelY);
+                glVertex2f(panelX + panelW, panelY + panelH);
+                glVertex2f(panelX, panelY + panelH);
+                glEnd();
+
+                glColor3f(0.93f, 0.95f, 0.98f);
+                drawHudText(panelX + 10.0f, panelY + 20.0f, "NPC Inspector", GLUT_BITMAP_HELVETICA_18);
+
+                std::ostringstream line0;
+                line0 << "ID: " << selected->id << "  State: " << npcStateLabel(selected->state);
+                drawHudText(panelX + 10.0f, panelY + 42.0f, line0.str());
+
+                std::ostringstream line1;
+                line1 << "Routine: " << npcStageLabel(selected->cycleStage)
+                      << "  Mode: " << (selected->finalApproach ? "Entering" : "Roadside Transit");
+                drawHudText(panelX + 10.0f, panelY + 58.0f, line1.str());
+
+                std::ostringstream line2;
+                line2 << "Pos: (" << std::fixed << std::setprecision(1) << selected->position.x << ", " << selected->position.y << ")";
+                drawHudText(panelX + 10.0f, panelY + 74.0f, line2.str());
+
+                std::ostringstream line3;
+                line3 << "Target: (" << std::fixed << std::setprecision(1) << selected->target.x << ", " << selected->target.y << ")";
+                drawHudText(panelX + 10.0f, panelY + 90.0f, line3.str());
+
+                std::ostringstream line4;
+                line4 << "Money: " << selected->money << "  Dwell: " << std::fixed << std::setprecision(1) << selected->dwellSeconds << "s";
+                drawHudText(panelX + 10.0f, panelY + 106.0f, line4.str());
+
+                drawHudText(panelX + 10.0f, panelY + 122.0f, "Tip: left-click an NPC to inspect; click empty area to clear.");
+
+                glPopMatrix();
+                glMatrixMode(GL_PROJECTION);
+                glPopMatrix();
+                glMatrixMode(GL_MODELVIEW);
             }
 
             void initializeCars(const world::CityMap &map, int tilePixels)
@@ -391,8 +737,10 @@ namespace civitasx
                     return;
                 }
 
-                std::vector<glm::vec2> buildingSpots;
-                std::vector<glm::vec2> foodSpots;
+                std::vector<glm::vec2> houseSpots;
+                std::vector<glm::vec2> officeSpots;
+                std::vector<glm::vec2> parkSpots;
+                std::vector<glm::vec2> anyBuildingSpots;
 
                 for (std::size_t row = 0; row < map.rows(); ++row)
                 {
@@ -406,47 +754,69 @@ namespace civitasx
 
                         if (tile == world::TileType::Building)
                         {
-                            buildingSpots.push_back(center);
+                            anyBuildingSpots.push_back(center);
+                            const BuildingStyle style = chooseBuildingStyle(
+                                map,
+                                static_cast<int>(row),
+                                static_cast<int>(col));
+                            if (style == BuildingStyle::House)
+                            {
+                                houseSpots.push_back(center);
+                            }
+                            else
+                            {
+                                officeSpots.push_back(center);
+                            }
                         }
-                        else if (tile == world::TileType::Park || tile == world::TileType::Empty)
+                        else if (tile == world::TileType::Park)
                         {
-                            foodSpots.push_back(center);
+                            parkSpots.push_back(center);
                         }
                     }
                 }
 
-                if (buildingSpots.empty())
+                if (anyBuildingSpots.empty())
                 {
                     g_npcRuntime.initialized = true;
                     return;
                 }
 
-                if (foodSpots.empty())
+                if (houseSpots.empty())
                 {
-                    foodSpots = buildingSpots;
+                    houseSpots = anyBuildingSpots;
+                }
+                if (officeSpots.empty())
+                {
+                    officeSpots = anyBuildingSpots;
+                }
+                if (parkSpots.empty())
+                {
+                    // Fallback: if no parks exist, NPCs rest at home instead of idling on roads.
+                    parkSpots = houseSpots;
                 }
 
-                const int npcCount = std::min(36, static_cast<int>(buildingSpots.size()));
-                std::uniform_int_distribution<std::size_t> homeDist(0, buildingSpots.size() - 1U);
-                std::uniform_int_distribution<std::size_t> foodDist(0, foodSpots.size() - 1U);
+                const int npcCount = std::min(36, static_cast<int>(anyBuildingSpots.size()));
+                std::uniform_int_distribution<std::size_t> homeDist(0, houseSpots.size() - 1U);
+                std::uniform_int_distribution<std::size_t> workDist(0, officeSpots.size() - 1U);
+                std::uniform_int_distribution<std::size_t> restDist(0, parkSpots.size() - 1U);
 
                 for (int i = 0; i < npcCount; ++i)
                 {
-                    const glm::vec2 home = buildingSpots[homeDist(g_npcRuntime.rng)];
+                    const glm::vec2 home = houseSpots[homeDist(g_npcRuntime.rng)];
 
-                    glm::vec2 work = buildingSpots[homeDist(g_npcRuntime.rng)];
+                    glm::vec2 work = officeSpots[workDist(g_npcRuntime.rng)];
                     int guard = 0;
                     while (work == home && guard < 12)
                     {
-                        work = buildingSpots[homeDist(g_npcRuntime.rng)];
+                        work = officeSpots[workDist(g_npcRuntime.rng)];
                         ++guard;
                     }
 
-                    glm::vec2 food = foodSpots[foodDist(g_npcRuntime.rng)];
+                    glm::vec2 food = parkSpots[restDist(g_npcRuntime.rng)];
                     guard = 0;
                     while ((food == home || food == work) && guard < 12)
                     {
-                        food = foodSpots[foodDist(g_npcRuntime.rng)];
+                        food = parkSpots[restDist(g_npcRuntime.rng)];
                         ++guard;
                     }
 
@@ -459,13 +829,15 @@ namespace civitasx
                     npc.state = agents::NpcState::Sleeping;
                     npc.cycleStage = 0;
                     npc.dwellSeconds = 3.0f + static_cast<float>(i % 4);
+                    npc.finalApproach = false;
+                    npc.hasAccessAnchor = false;
                     g_npcRuntime.npcs.push_back(npc);
                 }
 
                 g_npcRuntime.initialized = true;
             }
 
-            void updateNpcs(float deltaSeconds)
+            void updateNpcs(float deltaSeconds, const world::CityMap &map, int tilePixels)
             {
                 if (deltaSeconds <= 0.0f)
                 {
@@ -474,6 +846,8 @@ namespace civitasx
 
                 const float walkSpeed = 10.0f;
                 const float travelSpeed = 22.0f;
+                const float arrivalDistance = 1.25f;
+                const float enterDestinationDistance = static_cast<float>(tilePixels) * 1.35f;
 
                 for (agents::NpcAgent &npc : g_npcRuntime.npcs)
                 {
@@ -497,14 +871,17 @@ namespace civitasx
                         {
                             npc.state = agents::NpcState::Walking;
                         }
+                        npc.hasAccessAnchor = false;
                         continue;
                     }
 
-                    const glm::vec2 toTarget = npc.target - npc.position;
-                    const float distance = glm::length(toTarget);
-                    if (distance <= 0.75f)
+                    const glm::vec2 toDestination = npc.target - npc.position;
+                    const float distanceToDestination = glm::length(toDestination);
+                    if (distanceToDestination <= arrivalDistance)
                     {
                         npc.position = npc.target;
+                        npc.finalApproach = false;
+                        npc.hasAccessAnchor = false;
 
                         if (npc.cycleStage == 0)
                         {
@@ -513,6 +890,8 @@ namespace civitasx
                             npc.dwellSeconds = 10.0f;
                             npc.target = npc.food;
                             npc.cycleStage = 1;
+                            npc.finalApproach = false;
+                            npc.hasAccessAnchor = false;
                         }
                         else if (npc.cycleStage == 1)
                         {
@@ -521,6 +900,8 @@ namespace civitasx
                             npc.dwellSeconds = 6.0f;
                             npc.target = npc.home;
                             npc.cycleStage = 2;
+                            npc.finalApproach = false;
+                            npc.hasAccessAnchor = false;
                         }
                         else
                         {
@@ -528,16 +909,71 @@ namespace civitasx
                             npc.dwellSeconds = 12.0f;
                             npc.target = npc.work;
                             npc.cycleStage = 0;
+                            npc.finalApproach = false;
+                            npc.hasAccessAnchor = false;
                         }
 
                         continue;
                     }
 
-                    const glm::vec2 direction = toTarget / distance;
-                    const float speed = (distance < 12.0f) ? walkSpeed : travelSpeed;
+                    if (!npc.finalApproach && distanceToDestination <= enterDestinationDistance)
+                    {
+                        npc.finalApproach = true;
+                    }
+
+                    glm::vec2 moveTarget = npc.target;
+                    bool useRoadTransit = !npc.finalApproach;
+                    if (useRoadTransit)
+                    {
+                        if (!npc.hasAccessAnchor)
+                        {
+                            glm::vec2 anchor;
+                            if (findRoadsideAccessAnchor(map, tilePixels, npc.target, npc.id, anchor))
+                            {
+                                npc.accessAnchor = anchor;
+                                npc.hasAccessAnchor = true;
+                            }
+                            else
+                            {
+                                useRoadTransit = false;
+                                npc.finalApproach = true;
+                                npc.hasAccessAnchor = false;
+                            }
+                        }
+
+                        if (useRoadTransit && npc.hasAccessAnchor)
+                        {
+                            moveTarget = npc.accessAnchor;
+                        }
+                    }
+
+                    glm::vec2 toMoveTarget = moveTarget - npc.position;
+                    float distance = glm::length(toMoveTarget);
+                    if (distance <= arrivalDistance)
+                    {
+                        // Close enough to roadside anchor: commit to final destination entry.
+                        useRoadTransit = false;
+                        npc.finalApproach = true;
+                        npc.hasAccessAnchor = false;
+                        toMoveTarget = npc.target - npc.position;
+                        distance = glm::length(toMoveTarget);
+                        if (distance <= arrivalDistance)
+                        {
+                            continue;
+                        }
+                    }
+
+                    const glm::vec2 direction = toMoveTarget / distance;
+                    const float speed = useRoadTransit ? travelSpeed : walkSpeed;
                     const float step = std::min(speed * deltaSeconds, distance);
                     npc.position += direction * step;
-                    npc.state = (speed == walkSpeed) ? agents::NpcState::Walking : agents::NpcState::Traveling;
+
+                    if (useRoadTransit)
+                    {
+                        npc.position = snapToRoadside(map, tilePixels, npc.position, direction, npc.id);
+                    }
+
+                    npc.state = useRoadTransit ? agents::NpcState::Traveling : agents::NpcState::Walking;
                 }
             }
 
@@ -576,27 +1012,107 @@ namespace civitasx
 
                     const int px = static_cast<int>(npc.position.x);
                     const int py = static_cast<int>(npc.position.y);
+                    const bool isWoman = (npc.id % 2) != 0;
+                    const bool isMoving =
+                        (npc.state == agents::NpcState::Walking) ||
+                        (npc.state == agents::NpcState::Traveling);
 
-                    // Feet shadow.
+                    const int legSwing = isMoving ? ((npc.id % 3) - 1) : 0;
+
+                    const auto drawCircle = [](int cx, int cy, float radius, int segments)
+                    {
+                        const std::vector<glm::vec2> vertices = graphics::buildCircleFanVertices(
+                            {static_cast<float>(cx), static_cast<float>(cy)},
+                            radius,
+                            segments);
+                        glBegin(GL_TRIANGLE_FAN);
+                        for (const glm::vec2 &vertex : vertices)
+                        {
+                            glVertex2f(vertex.x, vertex.y);
+                        }
+                        glEnd();
+                    };
+
+                    const auto drawRect = [](int x, int y, int w, int h)
+                    {
+                        drawPoints(graphics::buildFilledRectPoints(x, y, w, h));
+                    };
+
+                    // Ground shadow.
                     glColor3f(0.08f, 0.09f, 0.10f);
-                    drawPoints(graphics::buildFilledRectPoints(px - 2, py + 4, 4, 1));
+                    drawRect(px - 3, py + 6, 6, 1);
 
-                    // Body.
+                    // Legs.
+                    glColor3f(0.16f, 0.18f, 0.22f);
+                    drawRect(px - 1 + legSwing, py + 2, 1, 4);
+                    drawRect(px + 0 - legSwing, py + 2, 1, 4);
+
+                    // Shoes.
+                    glColor3f(0.07f, 0.08f, 0.09f);
+                    drawRect(px - 2 + legSwing, py + 6, 2, 1);
+                    drawRect(px + 0 - legSwing, py + 6, 2, 1);
+
+                    // Torso/outfit (man/woman silhouette variation).
                     glColor3f(r, g, b);
-                    drawPoints(graphics::buildFilledRectPoints(px - 2, py - 1, 4, 5));
+                    if (isWoman)
+                    {
+                        drawRect(px - 2, py - 1, 4, 3);
+                        glBegin(GL_TRIANGLES);
+                        glVertex2f(static_cast<float>(px - 3), static_cast<float>(py + 2));
+                        glVertex2f(static_cast<float>(px + 3), static_cast<float>(py + 2));
+                        glVertex2f(static_cast<float>(px), static_cast<float>(py + 6));
+                        glEnd();
+                    }
+                    else
+                    {
+                        drawRect(px - 2, py - 1, 4, 5);
+                    }
+
+                    // Arms and hands.
+                    glColor3f(r * 0.90f, g * 0.90f, b * 0.90f);
+                    drawRect(px - 3, py + 0, 1, 4);
+                    drawRect(px + 2, py + 0, 1, 4);
+                    glColor3f(0.90f, 0.74f, 0.61f);
+                    drawRect(px - 3, py + 4, 1, 1);
+                    drawRect(px + 2, py + 4, 1, 1);
+
+                    // Neck.
+                    glColor3f(0.90f, 0.74f, 0.61f);
+                    drawRect(px, py - 2, 1, 1);
 
                     // Head.
                     glColor3f(0.93f, 0.79f, 0.66f);
-                    const std::vector<glm::vec2> head = graphics::buildCircleFanVertices(
-                        {static_cast<float>(px), static_cast<float>(py - 3)},
-                        2.0f,
-                        12);
-                    glBegin(GL_TRIANGLE_FAN);
-                    for (const glm::vec2 &vertex : head)
+                    drawCircle(px, py - 4, 1.8f, 12);
+
+                    // Hair / cap variant.
+                    if (isWoman)
                     {
-                        glVertex2f(vertex.x, vertex.y);
+                        glColor3f(0.22f, 0.15f, 0.10f);
+                        drawCircle(px, py - 5, 1.9f, 12);
+                        glColor3f(0.93f, 0.79f, 0.66f);
+                        drawRect(px - 1, py - 5, 2, 1);
                     }
-                    glEnd();
+                    else
+                    {
+                        glColor3f(0.18f, 0.20f, 0.23f);
+                        drawRect(px - 1, py - 6, 2, 1);
+                    }
+
+                    // Eyes.
+                    glColor3f(0.08f, 0.10f, 0.12f);
+                    drawRect(px - 1, py - 4, 1, 1);
+                    drawRect(px + 1, py - 4, 1, 1);
+
+                    if (npc.id == g_selectedNpcId)
+                    {
+                        glColor3f(0.98f, 0.93f, 0.32f);
+                        glBegin(GL_LINE_LOOP);
+                        glVertex2f(static_cast<float>(px - 5), static_cast<float>(py - 9));
+                        glVertex2f(static_cast<float>(px + 5), static_cast<float>(py - 9));
+                        glVertex2f(static_cast<float>(px + 5), static_cast<float>(py + 8));
+                        glVertex2f(static_cast<float>(px - 5), static_cast<float>(py + 8));
+                        glEnd();
+                    }
                 }
             }
 
@@ -1492,7 +2008,7 @@ namespace civitasx
                 npcDeltaSeconds = 0.0f;
             }
             npcDeltaSeconds = std::clamp(npcDeltaSeconds, 0.0f, 0.05f);
-            updateNpcs(npcDeltaSeconds);
+            updateNpcs(npcDeltaSeconds, cityMap, tilePixels);
             g_npcRuntime.lastSimulationSeconds = simulationSeconds;
 
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
@@ -1502,6 +2018,38 @@ namespace civitasx
             const float viewHalfHeight = (static_cast<float>(mapHeightPixels) * 0.5f) / safeZoom;
             const float viewHalfWidth = viewHalfHeight *
                                         (static_cast<float>(safeViewportWidth) / static_cast<float>(safeViewportHeight));
+
+            int clickX = 0;
+            int clickY = 0;
+            if (consumeLeftClick(clickX, clickY))
+            {
+                const glm::vec2 clickWorld = screenToWorldPoint(
+                    clickX,
+                    clickY,
+                    safeViewportWidth,
+                    safeViewportHeight,
+                    camera,
+                    viewHalfWidth,
+                    viewHalfHeight);
+
+                const float pickRadius = std::max(7.0f, 16.0f / safeZoom);
+                const float pickRadius2 = pickRadius * pickRadius;
+                int bestNpcId = -1;
+                float bestDist2 = std::numeric_limits<float>::max();
+
+                for (const agents::NpcAgent &npc : g_npcRuntime.npcs)
+                {
+                    const glm::vec2 delta = npc.position - clickWorld;
+                    const float dist2 = (delta.x * delta.x) + (delta.y * delta.y);
+                    if (dist2 <= pickRadius2 && dist2 < bestDist2)
+                    {
+                        bestDist2 = dist2;
+                        bestNpcId = npc.id;
+                    }
+                }
+
+                g_selectedNpcId = bestNpcId;
+            }
 
             // Fill the entire window to avoid letterboxing/pillarboxing.
             glViewport(0, 0, safeViewportWidth, safeViewportHeight);
@@ -1567,6 +2115,7 @@ namespace civitasx
 
             drawNpcs();
             drawCars();
+            drawNpcInspectorOverlay(safeViewportWidth, safeViewportHeight);
         }
 
     } // namespace engine

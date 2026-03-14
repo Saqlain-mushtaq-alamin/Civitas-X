@@ -17,8 +17,11 @@ namespace civitasx
             npc.work = spawnPosition;
             npc.food = spawnPosition;
             npc.target = spawnPosition;
+            npc.accessAnchor = spawnPosition;
             npc.cycleStage = 0;
             npc.dwellSeconds = 0.0f;
+            npc.finalApproach = false;
+            npc.hasAccessAnchor = false;
             return npc;
         }
 
