@@ -11,6 +11,7 @@
 #include <glm/geometric.hpp>
 
 #include "agents/car_agent.h"
+#include "ai/pathfinding.h"
 #include "engine/input.h"
 #include "graphics/algorithms.h"
 #include "systems/traffic_system.h"
@@ -78,49 +79,55 @@ namespace civitasx
                 std::mt19937 rng{17U};
                 std::vector<agents::CarAgent> cars;
                 std::vector<int> currentNodeByCar;
-                std::vector<int> previousNodeByCar;
-                std::vector<glm::vec2> nodeCenters;
-                std::vector<int> nodeRowsById;
-                std::vector<int> nodeColsById;
-                std::vector<std::vector<int>> adjacency;
-                std::vector<int> nodeByTile;
-                std::size_t nodeRows = 0;
-                std::size_t nodeCols = 0;
+                std::vector<std::vector<int>> routeByCar;
+                std::vector<std::size_t> routeStepByCar;
+                ai::RoadGraph graph;
             };
 
             CarRuntimeState g_carRuntime;
 
-            int tileIndexFor(std::size_t row, std::size_t col, std::size_t cols)
+            bool assignRouteForCar(std::size_t carIndex, int startNode)
             {
-                return static_cast<int>((row * cols) + col);
-            }
-
-            bool pickNextNode(int currentNode, int previousNode, int &nextNode)
-            {
-                if (currentNode < 0 || currentNode >= static_cast<int>(g_carRuntime.adjacency.size()))
+                if (carIndex >= g_carRuntime.cars.size() ||
+                    startNode < 0 ||
+                    startNode >= static_cast<int>(g_carRuntime.graph.nodeCenters.size()))
                 {
                     return false;
                 }
 
-                const std::vector<int> &neighbors = g_carRuntime.adjacency[static_cast<std::size_t>(currentNode)];
-                if (neighbors.empty())
+                int goalNode = -1;
+                if (!ai::chooseRandomGoalNode(g_carRuntime.rng, g_carRuntime.graph, startNode, goalNode))
                 {
                     return false;
                 }
 
-                std::vector<int> options;
-                options.reserve(neighbors.size());
-                for (int node : neighbors)
+                std::vector<int> path = ai::findPathAStar(g_carRuntime.graph, startNode, goalNode);
+                if (path.size() < 2U)
                 {
-                    if (node != previousNode)
+                    // Fallback if no path found: hop to any direct neighbor.
+                    const std::vector<int> &neighbors = g_carRuntime.graph.adjacency[static_cast<std::size_t>(startNode)];
+                    if (neighbors.empty())
                     {
-                        options.push_back(node);
+                        return false;
                     }
+
+                    std::uniform_int_distribution<std::size_t> pick(0, neighbors.size() - 1U);
+                    path = {startNode, neighbors[pick(g_carRuntime.rng)]};
                 }
 
-                const std::vector<int> &pool = options.empty() ? neighbors : options;
-                std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1U);
-                nextNode = pool[pick(g_carRuntime.rng)];
+                agents::CarAgent &car = g_carRuntime.cars[carIndex];
+                g_carRuntime.currentNodeByCar[carIndex] = startNode;
+                g_carRuntime.routeByCar[carIndex] = std::move(path);
+                g_carRuntime.routeStepByCar[carIndex] = 0U;
+
+                const int nextNode = g_carRuntime.routeByCar[carIndex][1];
+                car.target = g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(nextNode)];
+                const glm::vec2 heading = car.target - car.position;
+                if (glm::length(heading) > 0.0001f)
+                {
+                    car.angle = std::atan2(heading.y, heading.x);
+                }
+
                 return true;
             }
 
@@ -131,103 +138,33 @@ namespace civitasx
                     return;
                 }
 
-                g_carRuntime.nodeRows = map.rows();
-                g_carRuntime.nodeCols = map.cols();
-                g_carRuntime.nodeByTile.assign(g_carRuntime.nodeRows * g_carRuntime.nodeCols, -1);
-                g_carRuntime.nodeCenters.clear();
-                g_carRuntime.nodeRowsById.clear();
-                g_carRuntime.nodeColsById.clear();
-
-                for (std::size_t row = 0; row < map.rows(); ++row)
-                {
-                    for (std::size_t col = 0; col < map.cols(); ++col)
-                    {
-                        if (map.tileAt(row, col) != world::TileType::Road)
-                        {
-                            continue;
-                        }
-
-                        const int nodeId = static_cast<int>(g_carRuntime.nodeCenters.size());
-                        const int tileIndex = tileIndexFor(row, col, g_carRuntime.nodeCols);
-                        g_carRuntime.nodeByTile[static_cast<std::size_t>(tileIndex)] = nodeId;
-                        g_carRuntime.nodeCenters.push_back(
-                            {static_cast<float>(static_cast<int>(col) * tilePixels + (tilePixels / 2)),
-                             static_cast<float>(static_cast<int>(row) * tilePixels + (tilePixels / 2))});
-                        g_carRuntime.nodeRowsById.push_back(static_cast<int>(row));
-                        g_carRuntime.nodeColsById.push_back(static_cast<int>(col));
-                    }
-                }
-
-                g_carRuntime.adjacency.assign(g_carRuntime.nodeCenters.size(), {});
-                const int dRows[4] = {-1, 1, 0, 0};
-                const int dCols[4] = {0, 0, -1, 1};
-
-                for (std::size_t row = 0; row < g_carRuntime.nodeRows; ++row)
-                {
-                    for (std::size_t col = 0; col < g_carRuntime.nodeCols; ++col)
-                    {
-                        const int fromTile = tileIndexFor(row, col, g_carRuntime.nodeCols);
-                        const int fromNode = g_carRuntime.nodeByTile[static_cast<std::size_t>(fromTile)];
-                        if (fromNode < 0)
-                        {
-                            continue;
-                        }
-
-                        for (int i = 0; i < 4; ++i)
-                        {
-                            const int nRow = static_cast<int>(row) + dRows[i];
-                            const int nCol = static_cast<int>(col) + dCols[i];
-                            if (nRow < 0 || nCol < 0)
-                            {
-                                continue;
-                            }
-
-                            const std::size_t neighborRow = static_cast<std::size_t>(nRow);
-                            const std::size_t neighborCol = static_cast<std::size_t>(nCol);
-                            if (neighborRow >= g_carRuntime.nodeRows || neighborCol >= g_carRuntime.nodeCols)
-                            {
-                                continue;
-                            }
-
-                            const int toTile = tileIndexFor(neighborRow, neighborCol, g_carRuntime.nodeCols);
-                            const int toNode = g_carRuntime.nodeByTile[static_cast<std::size_t>(toTile)];
-                            if (toNode >= 0)
-                            {
-                                g_carRuntime.adjacency[static_cast<std::size_t>(fromNode)].push_back(toNode);
-                            }
-                        }
-                    }
-                }
+                g_carRuntime.graph = ai::buildRoadGraph(map, tilePixels);
 
                 g_carRuntime.cars.clear();
                 g_carRuntime.currentNodeByCar.clear();
-                g_carRuntime.previousNodeByCar.clear();
+                g_carRuntime.routeByCar.clear();
+                g_carRuntime.routeStepByCar.clear();
 
-                if (!g_carRuntime.nodeCenters.empty())
+                if (!g_carRuntime.graph.nodeCenters.empty())
                 {
-                    const int desiredCars = std::min(48, static_cast<int>(g_carRuntime.nodeCenters.size()));
+                    const int desiredCars = std::min(48, static_cast<int>(g_carRuntime.graph.nodeCenters.size()));
                     std::uniform_real_distribution<float> speedDist(32.0f, 62.0f);
-                    std::uniform_int_distribution<std::size_t> startDist(0, g_carRuntime.nodeCenters.size() - 1U);
+                    std::uniform_int_distribution<std::size_t> startDist(0, g_carRuntime.graph.nodeCenters.size() - 1U);
 
                     for (int i = 0; i < desiredCars; ++i)
                     {
                         const int startNode = static_cast<int>(startDist(g_carRuntime.rng));
-                        agents::CarAgent car = agents::makeDefaultCar(i, g_carRuntime.nodeCenters[static_cast<std::size_t>(startNode)], speedDist(g_carRuntime.rng));
-
-                        int nextNode = startNode;
-                        if (pickNextNode(startNode, -1, nextNode))
-                        {
-                            car.target = g_carRuntime.nodeCenters[static_cast<std::size_t>(nextNode)];
-                            const glm::vec2 heading = car.target - car.position;
-                            if (glm::length(heading) > 0.0001f)
-                            {
-                                car.angle = std::atan2(heading.y, heading.x);
-                            }
-                        }
+                        agents::CarAgent car = agents::makeDefaultCar(
+                            i,
+                            g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(startNode)],
+                            speedDist(g_carRuntime.rng));
 
                         g_carRuntime.cars.push_back(car);
                         g_carRuntime.currentNodeByCar.push_back(startNode);
-                        g_carRuntime.previousNodeByCar.push_back(-1);
+                        g_carRuntime.routeByCar.push_back({});
+                        g_carRuntime.routeStepByCar.push_back(0U);
+
+                        assignRouteForCar(static_cast<std::size_t>(i), startNode);
                     }
                 }
 
@@ -246,20 +183,53 @@ namespace civitasx
                 for (std::size_t i = 0; i < g_carRuntime.cars.size(); ++i)
                 {
                     agents::CarAgent &car = g_carRuntime.cars[i];
+
+                    int currentNode = g_carRuntime.currentNodeByCar[i];
+                    if (currentNode < 0 || currentNode >= static_cast<int>(g_carRuntime.graph.nodeCenters.size()))
+                    {
+                        continue;
+                    }
+
+                    std::vector<int> &route = g_carRuntime.routeByCar[i];
+                    std::size_t &routeStep = g_carRuntime.routeStepByCar[i];
+                    if (route.size() < 2U || routeStep + 1U >= route.size())
+                    {
+                        assignRouteForCar(i, currentNode);
+                    }
+
+                    if (route.size() < 2U || routeStep + 1U >= route.size())
+                    {
+                        continue;
+                    }
+
+                    int targetNode = route[routeStep + 1U];
+                    car.target = g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(targetNode)];
+
                     const glm::vec2 toTarget = car.target - car.position;
                     if (glm::length(toTarget) <= reachThreshold)
                     {
                         car.position = car.target;
 
-                        const int currentNode = g_carRuntime.currentNodeByCar[i];
-                        const int previousNode = g_carRuntime.previousNodeByCar[i];
-                        int nextNode = currentNode;
-                        if (pickNextNode(currentNode, previousNode, nextNode))
+                        currentNode = targetNode;
+                        g_carRuntime.currentNodeByCar[i] = currentNode;
+                        if (routeStep + 1U < route.size())
                         {
-                            g_carRuntime.previousNodeByCar[i] = currentNode;
-                            g_carRuntime.currentNodeByCar[i] = nextNode;
-                            car.target = g_carRuntime.nodeCenters[static_cast<std::size_t>(nextNode)];
+                            ++routeStep;
                         }
+
+                        if (routeStep + 1U >= route.size())
+                        {
+                            assignRouteForCar(i, currentNode);
+                            if (g_carRuntime.routeByCar[i].size() < 2U || g_carRuntime.routeStepByCar[i] + 1U >= g_carRuntime.routeByCar[i].size())
+                            {
+                                continue;
+                            }
+                            route = g_carRuntime.routeByCar[i];
+                            routeStep = g_carRuntime.routeStepByCar[i];
+                        }
+
+                        targetNode = route[routeStep + 1U];
+                        car.target = g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(targetNode)];
                     }
 
                     const glm::vec2 toNext = car.target - car.position;
@@ -275,31 +245,29 @@ namespace civitasx
                     float speedScale = 1.0f;
                     float maxTravel = distanceToNext;
 
-                    const int targetNode = g_carRuntime.currentNodeByCar[i];
-                    const int previousNode = g_carRuntime.previousNodeByCar[i];
                     const bool hasValidTargetNode =
-                        (targetNode >= 0 && targetNode < static_cast<int>(g_carRuntime.nodeCenters.size()));
-                    const bool hasValidPreviousNode =
-                        (previousNode >= 0 && previousNode < static_cast<int>(g_carRuntime.nodeCenters.size()));
+                        (targetNode >= 0 && targetNode < static_cast<int>(g_carRuntime.graph.nodeCenters.size()));
+                    const bool hasValidCurrentNode =
+                        (currentNode >= 0 && currentNode < static_cast<int>(g_carRuntime.graph.nodeCenters.size()));
 
                     // Once a car enters an intersection box, keep it flowing through.
                     bool committedInIntersection = false;
-                    if (hasValidPreviousNode)
+                    if (hasValidCurrentNode)
                     {
-                        const int prevRow = g_carRuntime.nodeRowsById[static_cast<std::size_t>(previousNode)];
-                        const int prevCol = g_carRuntime.nodeColsById[static_cast<std::size_t>(previousNode)];
-                        if (systems::isSignalizedIntersection(map, prevRow, prevCol))
+                        const int currentRow = g_carRuntime.graph.nodeRowsById[static_cast<std::size_t>(currentNode)];
+                        const int currentCol = g_carRuntime.graph.nodeColsById[static_cast<std::size_t>(currentNode)];
+                        if (systems::isSignalizedIntersection(map, currentRow, currentCol))
                         {
-                            const float distanceFromPrevCenter =
-                                glm::length(car.position - g_carRuntime.nodeCenters[static_cast<std::size_t>(previousNode)]);
-                            committedInIntersection = (distanceFromPrevCenter <= (static_cast<float>(tilePixels) * 0.7f));
+                            const float distanceFromCurrentCenter =
+                                glm::length(car.position - g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(currentNode)]);
+                            committedInIntersection = (distanceFromCurrentCenter <= (static_cast<float>(tilePixels) * 0.7f));
                         }
                     }
 
                     if (hasValidTargetNode && !committedInIntersection)
                     {
-                        const int targetRow = g_carRuntime.nodeRowsById[static_cast<std::size_t>(targetNode)];
-                        const int targetCol = g_carRuntime.nodeColsById[static_cast<std::size_t>(targetNode)];
+                        const int targetRow = g_carRuntime.graph.nodeRowsById[static_cast<std::size_t>(targetNode)];
+                        const int targetCol = g_carRuntime.graph.nodeColsById[static_cast<std::size_t>(targetNode)];
 
                         if (systems::isSignalizedIntersection(map, targetRow, targetCol))
                         {
@@ -398,6 +366,21 @@ namespace civitasx
 
             void drawCars()
             {
+                const auto drawOrientedQuad = [](const glm::vec2 &center, const glm::vec2 &forward, const glm::vec2 &right, float halfLength, float halfWidth)
+                {
+                    const glm::vec2 frontLeft = center + (forward * halfLength) - (right * halfWidth);
+                    const glm::vec2 frontRight = center + (forward * halfLength) + (right * halfWidth);
+                    const glm::vec2 rearRight = center - (forward * halfLength) + (right * halfWidth);
+                    const glm::vec2 rearLeft = center - (forward * halfLength) - (right * halfWidth);
+
+                    glBegin(GL_QUADS);
+                    glVertex2f(frontLeft.x, frontLeft.y);
+                    glVertex2f(frontRight.x, frontRight.y);
+                    glVertex2f(rearRight.x, rearRight.y);
+                    glVertex2f(rearLeft.x, rearLeft.y);
+                    glEnd();
+                };
+
                 for (const agents::CarAgent &car : g_carRuntime.cars)
                 {
                     const float cosA = std::cos(car.angle);
@@ -405,39 +388,83 @@ namespace civitasx
                     const glm::vec2 forward{cosA, sinA};
                     const glm::vec2 right{-sinA, cosA};
 
-                    const float halfLength = 5.5f;
-                    const float halfWidth = 2.8f;
+                    const float halfLength = 6.2f;
+                    const float halfWidth = 3.1f;
 
                     // Keep cars in directional lanes: right-hand side of travel direction.
                     const float laneOffset = 2.2f;
                     const glm::vec2 center = car.position + (right * laneOffset);
-                    const glm::vec2 frontLeft = center + (forward * halfLength) - (right * halfWidth);
-                    const glm::vec2 frontRight = center + (forward * halfLength) + (right * halfWidth);
-                    const glm::vec2 rearRight = center - (forward * halfLength) + (right * halfWidth);
-                    const glm::vec2 rearLeft = center - (forward * halfLength) - (right * halfWidth);
+                    const glm::vec2 noseCenter = center + (forward * (halfLength - 0.55f));
 
                     // Body color variation by id for visual differentiation.
                     const float hue = static_cast<float>((car.id * 37) % 100) / 100.0f;
-                    glColor3f(0.30f + (0.5f * hue), 0.22f + (0.35f * (1.0f - hue)), 0.28f + (0.45f * hue));
-                    glBegin(GL_QUADS);
-                    glVertex2f(frontLeft.x, frontLeft.y);
-                    glVertex2f(frontRight.x, frontRight.y);
-                    glVertex2f(rearRight.x, rearRight.y);
-                    glVertex2f(rearLeft.x, rearLeft.y);
-                    glEnd();
+                    const float bodyR = 0.30f + (0.5f * hue);
+                    const float bodyG = 0.22f + (0.35f * (1.0f - hue));
+                    const float bodyB = 0.28f + (0.45f * hue);
 
-                    // Windshield strip.
-                    const glm::vec2 windshieldLeft = center + (forward * 1.8f) - (right * (halfWidth - 0.5f));
-                    const glm::vec2 windshieldRight = center + (forward * 1.8f) + (right * (halfWidth - 0.5f));
-                    const glm::vec2 windshieldRearRight = center + (forward * 0.2f) + (right * (halfWidth - 0.5f));
-                    const glm::vec2 windshieldRearLeft = center + (forward * 0.2f) - (right * (halfWidth - 0.5f));
-                    glColor3f(0.70f, 0.86f, 0.95f);
-                    glBegin(GL_QUADS);
-                    glVertex2f(windshieldLeft.x, windshieldLeft.y);
-                    glVertex2f(windshieldRight.x, windshieldRight.y);
-                    glVertex2f(windshieldRearRight.x, windshieldRearRight.y);
-                    glVertex2f(windshieldRearLeft.x, windshieldRearLeft.y);
-                    glEnd();
+                    // Ground shadow improves depth and readability while moving.
+                    glColor3f(0.06f, 0.07f, 0.08f);
+                    drawOrientedQuad(center + glm::vec2(0.8f, 1.0f), forward, right, halfLength + 0.4f, halfWidth + 0.35f);
+
+                    // Main body shell.
+                    glColor3f(bodyR, bodyG, bodyB);
+                    drawOrientedQuad(center, forward, right, halfLength, halfWidth);
+
+                    // Hood and trunk color accents.
+                    glColor3f(bodyR * 0.86f, bodyG * 0.86f, bodyB * 0.86f);
+                    drawOrientedQuad(center + (forward * 3.2f), forward, right, 1.8f, halfWidth - 0.45f);
+                    glColor3f(bodyR * 0.74f, bodyG * 0.74f, bodyB * 0.74f);
+                    drawOrientedQuad(center - (forward * 3.1f), forward, right, 1.5f, halfWidth - 0.45f);
+
+                    // Passenger cabin and roof.
+                    glColor3f(0.14f, 0.17f, 0.21f);
+                    drawOrientedQuad(center + (forward * 0.4f), forward, right, 2.8f, halfWidth - 0.75f);
+
+                    glColor3f(0.56f, 0.62f, 0.68f);
+                    drawOrientedQuad(center + (forward * 0.7f), forward, right, 1.2f, halfWidth - 1.1f);
+
+                    // Windshields (front/rear) and side glass strip.
+                    glColor3f(0.72f, 0.86f, 0.96f);
+                    drawOrientedQuad(center + (forward * 1.95f), forward, right, 0.9f, halfWidth - 1.0f);
+                    glColor3f(0.61f, 0.75f, 0.87f);
+                    drawOrientedQuad(center - (forward * 1.35f), forward, right, 0.75f, halfWidth - 1.05f);
+
+                    glColor3f(0.38f, 0.47f, 0.56f);
+                    drawOrientedQuad(center + (forward * 0.25f), forward, right, 0.5f, halfWidth - 0.95f);
+
+                    // Wheels.
+                    glColor3f(0.09f, 0.10f, 0.11f);
+                    drawOrientedQuad(center + (forward * 2.9f) + (right * 2.65f), forward, right, 0.95f, 0.55f);
+                    drawOrientedQuad(center + (forward * 2.9f) - (right * 2.65f), forward, right, 0.95f, 0.55f);
+                    drawOrientedQuad(center - (forward * 2.7f) + (right * 2.65f), forward, right, 0.95f, 0.55f);
+                    drawOrientedQuad(center - (forward * 2.7f) - (right * 2.65f), forward, right, 0.95f, 0.55f);
+
+                    // Wheel rims.
+                    glColor3f(0.70f, 0.72f, 0.74f);
+                    drawOrientedQuad(center + (forward * 2.9f) + (right * 2.65f), forward, right, 0.40f, 0.32f);
+                    drawOrientedQuad(center + (forward * 2.9f) - (right * 2.65f), forward, right, 0.40f, 0.32f);
+                    drawOrientedQuad(center - (forward * 2.7f) + (right * 2.65f), forward, right, 0.40f, 0.32f);
+                    drawOrientedQuad(center - (forward * 2.7f) - (right * 2.65f), forward, right, 0.40f, 0.32f);
+
+                    // Headlights and tail lights.
+                    glColor3f(0.95f, 0.94f, 0.78f);
+                    drawOrientedQuad(noseCenter + (right * 1.65f), forward, right, 0.36f, 0.24f);
+                    drawOrientedQuad(noseCenter - (right * 1.65f), forward, right, 0.36f, 0.24f);
+
+                    glColor3f(0.88f, 0.20f, 0.16f);
+                    drawOrientedQuad(center - (forward * (halfLength - 0.45f)) + (right * 1.65f), forward, right, 0.36f, 0.24f);
+                    drawOrientedQuad(center - (forward * (halfLength - 0.45f)) - (right * 1.65f), forward, right, 0.36f, 0.24f);
+
+                    // Front grille and rear bumper trims.
+                    glColor3f(0.10f, 0.12f, 0.13f);
+                    drawOrientedQuad(center + (forward * (halfLength - 0.9f)), forward, right, 0.22f, 1.35f);
+                    glColor3f(0.18f, 0.19f, 0.20f);
+                    drawOrientedQuad(center - (forward * (halfLength - 0.95f)), forward, right, 0.24f, 1.30f);
+
+                    // Roof rails for premium vehicle silhouette.
+                    glColor3f(0.82f, 0.84f, 0.86f);
+                    drawOrientedQuad(center + (forward * 0.8f) + (right * 0.9f), forward, right, 1.35f, 0.10f);
+                    drawOrientedQuad(center + (forward * 0.8f) - (right * 0.9f), forward, right, 1.35f, 0.10f);
                 }
             }
 
@@ -661,6 +688,11 @@ namespace civitasx
                     glColor3f(0.26f, 0.27f, 0.29f);
                     drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
 
+                    // Subtle perimeter shadow adds depth between blocks.
+                    glColor3f(0.16f, 0.17f, 0.19f);
+                    drawPoints(graphics::buildFilledRectPoints(ix, iy + isize - 3, isize, 3));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 3, iy, 3, isize));
+
                     glColor3f(0.80f, 0.82f, 0.84f);
                     drawSolidLine(ix + 3, iy + 3, ix + isize - 4, iy + 3);
                     drawSolidLine(ix + 3, iy + isize - 4, ix + isize - 4, iy + isize - 4);
@@ -671,6 +703,14 @@ namespace civitasx
                     {
                         drawSolidLine(px, iy + 5, px, iy + isize - 6);
                     }
+
+                    // Parking booth and a light pole.
+                    glColor3f(0.62f, 0.64f, 0.66f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + 2, 4, 3));
+                    glColor3f(0.20f, 0.22f, 0.24f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 5, iy + 4, 1, 7));
+                    glColor3f(0.96f, 0.92f, 0.68f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 6, iy + 3, 3, 2));
                 }
                 else if (variant == 1)
                 {
@@ -697,6 +737,15 @@ namespace civitasx
                         glVertex2f(vertex.x, vertex.y);
                     }
                     glEnd();
+
+                    // Seating corners and a tiny statue base.
+                    glColor3f(0.46f, 0.47f, 0.47f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + 2, 3, 1));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 5, iy + 2, 3, 1));
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + isize - 3, 3, 1));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 5, iy + isize - 3, 3, 1));
+                    glColor3f(0.70f, 0.72f, 0.74f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 1, iy + (isize / 2) - 1, 2, 2));
                 }
                 else
                 {
@@ -736,6 +785,12 @@ namespace civitasx
                         glVertex2f(vertex.x, vertex.y);
                     }
                     glEnd();
+
+                    // Picnic table + flower strip.
+                    glColor3f(0.54f, 0.37f, 0.24f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + isize - 6, 5, 2));
+                    glColor3f(0.86f, 0.42f, 0.58f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 10, iy + 3, 5, 2));
                 }
             }
 
@@ -818,12 +873,11 @@ namespace civitasx
                         8,
                         8));
 
-                    const systems::IntersectionSignalState signal =
-                        systems::queryIntersectionSignal(
-                            map,
-                            row,
-                            col,
-                            simulationSeconds);
+                    const int roadConnections =
+                        (hasLeft ? 1 : 0) +
+                        (hasRight ? 1 : 0) +
+                        (hasUp ? 1 : 0) +
+                        (hasDown ? 1 : 0);
 
                     const auto drawLamp = [&](int cx, int cy, systems::TrafficLightColor color, bool isActive)
                     {
@@ -867,13 +921,43 @@ namespace civitasx
                         drawLamp(x0 + 2, y0 + 6, systems::TrafficLightColor::Green, activeColor == systems::TrafficLightColor::Green);
                     };
 
-                    // Horizontal approach heads (east/west traffic).
-                    drawSignalHead(ix + 2, iy + (isize / 2) - 4, signal.horizontal);
-                    drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, signal.horizontal);
+                    if (roadConnections >= 4)
+                    {
+                        const systems::IntersectionSignalState signal =
+                            systems::queryIntersectionSignal(
+                                map,
+                                row,
+                                col,
+                                simulationSeconds);
 
-                    // Vertical approach heads (north/south traffic).
-                    drawSignalHead(ix + (isize / 2) - 2, iy + 2, signal.vertical);
-                    drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, signal.vertical);
+                        // Horizontal approach heads (east/west traffic).
+                        drawSignalHead(ix + 2, iy + (isize / 2) - 4, signal.horizontal);
+                        drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, signal.horizontal);
+
+                        // Vertical approach heads (north/south traffic).
+                        drawSignalHead(ix + (isize / 2) - 2, iy + 2, signal.vertical);
+                        drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, signal.vertical);
+                    }
+                    else if (roadConnections == 3)
+                    {
+                        // For T-junctions, keep all active heads green to avoid broken signal behavior.
+                        if (hasLeft)
+                        {
+                            drawSignalHead(ix + 2, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                        }
+                        if (hasRight)
+                        {
+                            drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                        }
+                        if (hasUp)
+                        {
+                            drawSignalHead(ix + (isize / 2) - 2, iy + 2, systems::TrafficLightColor::Green);
+                        }
+                        if (hasDown)
+                        {
+                            drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, systems::TrafficLightColor::Green);
+                        }
+                    }
                 }
             }
 
@@ -890,6 +974,11 @@ namespace civitasx
                     // Ground pad around the office to anchor the perspective building.
                     glColor3f(0.24f, 0.26f, 0.28f);
                     drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                    // Plaza paving border.
+                    glColor3f(0.34f, 0.36f, 0.38f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 1, iy + 1, isize - 2, 2));
+                    drawPoints(graphics::buildFilledRectPoints(ix + 1, iy + isize - 3, isize - 2, 2));
 
                     glColor3f(0.30f, 0.33f, 0.36f);
                     drawPoints(graphics::buildFilledRectPoints(ix + 3, iy + isize - 8, isize - 6, 5));
@@ -942,6 +1031,14 @@ namespace civitasx
                     // Small rooftop HVAC unit for realism.
                     glColor3f(0.48f, 0.52f, 0.56f);
                     drawQuad(cornerX + 2, roofEdgeY - 1, cornerX + 4, roofEdgeY - 2, cornerX + 5, roofEdgeY, cornerX + 3, roofEdgeY + 1);
+
+                    // Street furniture near office entrance.
+                    glColor3f(0.22f, 0.24f, 0.26f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + isize - 4, 2, 3));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 4, iy + isize - 4, 2, 3));
+                    glColor3f(0.18f, 0.42f, 0.21f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + isize - 6, 2, 2));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 4, iy + isize - 6, 2, 2));
                     return;
                 }
 
@@ -1041,6 +1138,12 @@ namespace civitasx
                     glVertex2f(vertex.x, vertex.y);
                 }
                 glEnd();
+
+                // Mailbox and driveway edge.
+                glColor3f(0.12f, 0.24f, 0.60f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + isize - 4, 2, 3));
+                glColor3f(0.62f, 0.62f, 0.60f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 9, iy + isize - 3, 6, 2));
             }
 
             void drawPark(float x, float y, float size)
@@ -1052,6 +1155,13 @@ namespace civitasx
                 // Base grass.
                 glColor3f(0.22f, 0.58f, 0.26f);
                 drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                // Border hedge ring.
+                glColor3f(0.16f, 0.46f, 0.20f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 1, iy + 1, isize - 2, 1));
+                drawPoints(graphics::buildFilledRectPoints(ix + 1, iy + isize - 2, isize - 2, 1));
+                drawPoints(graphics::buildFilledRectPoints(ix + 1, iy + 1, 1, isize - 2));
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 2, iy + 1, 1, isize - 2));
 
                 // Inner lawn patch for depth.
                 glColor3f(0.30f, 0.66f, 0.32f);
@@ -1066,6 +1176,8 @@ namespace civitasx
                 glColor3f(0.28f, 0.62f, 0.86f);
                 drawPoints(graphics::buildFilledRectPoints(ix + isize - 11, iy + 4, 6, 4));
                 drawPoints(graphics::buildFilledRectPoints(ix + isize - 10, iy + 8, 4, 2));
+                glColor3f(0.66f, 0.88f, 0.96f);
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 10, iy + 5, 3, 1));
 
                 // Tree canopies (circles from midpoint algorithm).
                 glColor3f(0.14f, 0.44f, 0.19f);
@@ -1093,6 +1205,15 @@ namespace civitasx
                 // Flower bed accent.
                 glColor3f(0.92f, 0.38f, 0.56f);
                 drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + isize - 7, 5, 2));
+
+                // Benches and lamp post.
+                glColor3f(0.53f, 0.37f, 0.24f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + 4, 4, 1));
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 9, iy + isize - 5, 4, 1));
+                glColor3f(0.24f, 0.24f, 0.25f);
+                drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2), iy + 5, 1, 8));
+                glColor3f(0.95f, 0.93f, 0.70f);
+                drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 1, iy + 4, 3, 2));
             }
 
         } // namespace
@@ -1156,6 +1277,18 @@ namespace civitasx
 
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
+
+            // Soft atmospheric base tint under the whole city block.
+            glBegin(GL_QUADS);
+            glColor3f(0.11f, 0.15f, 0.18f);
+            glVertex2f(0.0f, 0.0f);
+            glColor3f(0.13f, 0.17f, 0.20f);
+            glVertex2f(static_cast<float>(mapWidthPixels), 0.0f);
+            glColor3f(0.18f, 0.20f, 0.18f);
+            glVertex2f(static_cast<float>(mapWidthPixels), static_cast<float>(mapHeightPixels));
+            glColor3f(0.16f, 0.19f, 0.17f);
+            glVertex2f(0.0f, static_cast<float>(mapHeightPixels));
+            glEnd();
 
             // Render tile map by looping through each cell and drawing by type.
             for (std::size_t row = 0; row < cityMap.rows(); ++row)
