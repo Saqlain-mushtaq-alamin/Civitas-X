@@ -14,6 +14,12 @@ namespace civitasx
         namespace
         {
 
+            enum class BuildingStyle
+            {
+                House,
+                Office,
+            };
+
             bool isRoadTile(const world::CityMap &map, int row, int col)
             {
                 if (row < 0 || col < 0)
@@ -29,6 +35,29 @@ namespace civitasx
                 }
 
                 return map.tileAt(rowIndex, colIndex) == world::TileType::Road;
+            }
+
+            BuildingStyle chooseBuildingStyle(const world::CityMap &map, int row, int col)
+            {
+                // Make offices appear around stronger road activity, houses elsewhere.
+                const int roadNeighbors =
+                    (isRoadTile(map, row, col - 1) ? 1 : 0) +
+                    (isRoadTile(map, row, col + 1) ? 1 : 0) +
+                    (isRoadTile(map, row - 1, col) ? 1 : 0) +
+                    (isRoadTile(map, row + 1, col) ? 1 : 0);
+
+                if (roadNeighbors >= 2)
+                {
+                    return BuildingStyle::Office;
+                }
+
+                // Deterministic variation for blocks not directly connected to major roads.
+                if (((row * 13) + (col * 7)) % 5 == 0)
+                {
+                    return BuildingStyle::Office;
+                }
+
+                return BuildingStyle::House;
             }
 
             void drawPoints(const std::vector<glm::ivec2> &points)
@@ -184,14 +213,102 @@ namespace civitasx
                 }
             }
 
-            void drawBuilding(float x, float y, float size)
+            void drawBuilding(const world::CityMap &map, int row, int col, float x, float y, float size)
             {
-                glColor3f(0.70f, 0.55f, 0.25f);
-                drawPoints(graphics::buildFilledRectPoints(
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(size),
-                    static_cast<int>(size)));
+                const int ix = static_cast<int>(x);
+                const int iy = static_cast<int>(y);
+                const int isize = static_cast<int>(size);
+
+                const BuildingStyle style = chooseBuildingStyle(map, row, col);
+
+                if (style == BuildingStyle::Office)
+                {
+                    // Office lot base.
+                    glColor3f(0.20f, 0.23f, 0.26f);
+                    drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                    // Main tower body.
+                    const int towerX = ix + 5;
+                    const int towerY = iy + 3;
+                    const int towerW = isize - 10;
+                    const int towerH = isize - 6;
+                    glColor3f(0.16f, 0.26f, 0.37f);
+                    drawPoints(graphics::buildFilledRectPoints(towerX, towerY, towerW, towerH));
+
+                    // Glass window bands.
+                    glColor3f(0.52f, 0.79f, 0.92f);
+                    for (int yy = towerY + 3; yy <= towerY + towerH - 4; yy += 4)
+                    {
+                        drawSolidLine(towerX + 2, yy, towerX + towerW - 3, yy);
+                    }
+
+                    // Vertical mullions.
+                    glColor3f(0.32f, 0.52f, 0.66f);
+                    for (int xx = towerX + 3; xx <= towerX + towerW - 4; xx += 5)
+                    {
+                        drawSolidLine(xx, towerY + 2, xx, towerY + towerH - 3);
+                    }
+
+                    // Entrance lobby at ground level.
+                    glColor3f(0.74f, 0.86f, 0.92f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 4, iy + isize - 7, 8, 5));
+
+                    // Subtle rooftop accent strip.
+                    glColor3f(0.11f, 0.18f, 0.25f);
+                    drawPoints(graphics::buildFilledRectPoints(towerX, towerY, towerW, 2));
+                    return;
+                }
+
+                // Plot background so each house sits on a clean lot.
+                glColor3f(0.24f, 0.30f, 0.22f);
+                drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                // Main house body.
+                const int bodyX = ix + 4;
+                const int bodyY = iy + 10;
+                const int bodyW = isize - 8;
+                const int bodyH = isize - 12;
+                glColor3f(0.84f, 0.77f, 0.67f);
+                drawPoints(graphics::buildFilledRectPoints(bodyX, bodyY, bodyW, bodyH));
+
+                // Pitched roof made from horizontal spans (triangle fill effect).
+                const int roofTopY = iy + 3;
+                const int roofBaseY = bodyY + 2;
+                const int roofCenterX = ix + (isize / 2);
+                glColor3f(0.56f, 0.22f, 0.18f);
+                for (int yy = roofTopY; yy <= roofBaseY; ++yy)
+                {
+                    const int roofHalfWidth = (yy - roofTopY) + 1;
+                    const int leftX = roofCenterX - roofHalfWidth;
+                    const int rightX = roofCenterX + roofHalfWidth;
+                    drawSolidLine(leftX, yy, rightX, yy);
+                }
+
+                // Roof edge line for cleaner shape.
+                glColor3f(0.44f, 0.16f, 0.13f);
+                drawSolidLine(bodyX - 1, roofBaseY, bodyX + bodyW, roofBaseY);
+
+                // Door.
+                const int doorW = 4;
+                const int doorH = 7;
+                const int doorX = ix + (isize / 2) - (doorW / 2);
+                const int doorY = iy + isize - doorH - 1;
+                glColor3f(0.31f, 0.20f, 0.14f);
+                drawPoints(graphics::buildFilledRectPoints(doorX, doorY, doorW, doorH));
+
+                // Windows.
+                glColor3f(0.72f, 0.86f, 0.94f);
+                drawPoints(graphics::buildFilledRectPoints(bodyX + 2, bodyY + 4, 4, 3));
+                drawPoints(graphics::buildFilledRectPoints(bodyX + bodyW - 6, bodyY + 4, 4, 3));
+
+                // Window frames.
+                glColor3f(0.52f, 0.46f, 0.38f);
+                drawSolidLine(bodyX + 4, bodyY + 4, bodyX + 4, bodyY + 6);
+                drawSolidLine(bodyX + bodyW - 4, bodyY + 4, bodyX + bodyW - 4, bodyY + 6);
+
+                // Small walkway from door to lot edge.
+                glColor3f(0.62f, 0.62f, 0.60f);
+                drawPoints(graphics::buildFilledRectPoints(doorX + 1, doorY + doorH, 2, isize - (doorY + doorH - iy)));
             }
 
             void drawPark(float x, float y, float size)
@@ -250,7 +367,7 @@ namespace civitasx
                         drawRoad(cityMap, rowIndex, colIndex, x, y, tileSize);
                         break;
                     case world::TileType::Building:
-                        drawBuilding(x, y, tileSize);
+                        drawBuilding(cityMap, rowIndex, colIndex, x, y, tileSize);
                         break;
                     case world::TileType::Park:
                         drawPark(x, y, tileSize);
