@@ -19,6 +19,8 @@ namespace civitasx
                 bool moveRight = false;
                 bool moveUp = false;
                 bool moveDown = false;
+                bool paused = false;
+                bool pendingReset = false;
 
                 bool hasMouse = false;
                 int mouseX = 0;
@@ -29,6 +31,8 @@ namespace civitasx
 
                 float centerX = 0.0f;
                 float centerY = 0.0f;
+                int mapWidthPixels = 1;
+                int mapHeightPixels = 1;
 
                 float zoom = 1.0f;
                 float targetZoom = 1.0f;
@@ -60,6 +64,55 @@ namespace civitasx
                 return (value < 0.0f) ? -scaled : scaled;
             }
 
+            void applyScrollDirection(int direction);
+
+            void clearMovementState()
+            {
+                g_navigation.moveLeft = false;
+                g_navigation.moveRight = false;
+                g_navigation.moveUp = false;
+                g_navigation.moveDown = false;
+                g_navigation.velocityX = 0.0f;
+                g_navigation.velocityY = 0.0f;
+                g_navigation.hasMouse = false;
+            }
+
+            void resetCameraToMapCenter()
+            {
+                g_navigation.centerX = static_cast<float>(g_navigation.mapWidthPixels) * 0.5f;
+                g_navigation.centerY = static_cast<float>(g_navigation.mapHeightPixels) * 0.5f;
+                g_navigation.zoom = 1.0f;
+                g_navigation.targetZoom = 1.0f;
+                g_navigation.velocityX = 0.0f;
+                g_navigation.velocityY = 0.0f;
+            }
+
+            bool handleActionKey(unsigned char key)
+            {
+                switch (key)
+                {
+                case 'q':
+                case 'Q':
+                    g_navigation.paused = !g_navigation.paused;
+                    clearMovementState();
+                    return true;
+                case 'r':
+                case 'R':
+                    g_navigation.pendingReset = true;
+                    return true;
+                case 'z':
+                case 'Z':
+                    applyScrollDirection(1);
+                    return true;
+                case 'x':
+                case 'X':
+                    applyScrollDirection(-1);
+                    return true;
+                default:
+                    return false;
+                }
+            }
+
             void setNormalKeyState(unsigned char key, bool pressed)
             {
                 switch (key)
@@ -89,6 +142,18 @@ namespace civitasx
             {
                 static_cast<void>(x);
                 static_cast<void>(y);
+
+                const bool handled = handleActionKey(key);
+                if (handled)
+                {
+                    return;
+                }
+
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 setNormalKeyState(key, true);
             }
 
@@ -96,6 +161,12 @@ namespace civitasx
             {
                 static_cast<void>(x);
                 static_cast<void>(y);
+
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 setNormalKeyState(key, false);
             }
 
@@ -103,6 +174,12 @@ namespace civitasx
             {
                 static_cast<void>(x);
                 static_cast<void>(y);
+
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 switch (key)
                 {
                 case GLUT_KEY_LEFT:
@@ -126,6 +203,12 @@ namespace civitasx
             {
                 static_cast<void>(x);
                 static_cast<void>(y);
+
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 switch (key)
                 {
                 case GLUT_KEY_LEFT:
@@ -147,6 +230,11 @@ namespace civitasx
 
             void setMousePosition(int x, int y)
             {
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 g_navigation.hasMouse = true;
                 g_navigation.mouseX = x;
                 g_navigation.mouseY = y;
@@ -159,6 +247,11 @@ namespace civitasx
 
             void applyScrollDirection(int direction)
             {
+                if (g_navigation.paused)
+                {
+                    return;
+                }
+
                 const float zoomStep = (direction > 0) ? 1.12f : (1.0f / 1.12f);
                 g_navigation.targetZoom *= zoomStep;
                 g_navigation.targetZoom = std::clamp(g_navigation.targetZoom, kMinZoom, kMaxZoom);
@@ -215,11 +308,20 @@ namespace civitasx
             const int safeMapWidth = (mapWidthPixels <= 0) ? 1 : mapWidthPixels;
             const int safeMapHeight = (mapHeightPixels <= 0) ? 1 : mapHeightPixels;
 
+            g_navigation.mapWidthPixels = safeMapWidth;
+            g_navigation.mapHeightPixels = safeMapHeight;
+
             if (!g_navigation.cameraInitialized)
             {
                 g_navigation.centerX = static_cast<float>(safeMapWidth) * 0.5f;
                 g_navigation.centerY = static_cast<float>(safeMapHeight) * 0.5f;
                 g_navigation.cameraInitialized = true;
+            }
+
+            if (g_navigation.pendingReset)
+            {
+                resetCameraToMapCenter();
+                g_navigation.pendingReset = false;
             }
 
             const float now = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
@@ -230,6 +332,11 @@ namespace civitasx
             }
             g_navigation.lastUpdateTimeSeconds = now;
             g_navigation.timingReady = true;
+
+            if (g_navigation.paused)
+            {
+                return;
+            }
 
             if (dt <= 0.0f)
             {
