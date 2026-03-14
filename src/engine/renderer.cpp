@@ -124,12 +124,95 @@ namespace civitasx
 
             void drawEmpty(float x, float y, float size)
             {
-                glColor3f(0.08f, 0.08f, 0.08f);
-                drawPoints(graphics::buildFilledRectPoints(
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(size),
-                    static_cast<int>(size)));
+                const int ix = static_cast<int>(x);
+                const int iy = static_cast<int>(y);
+                const int isize = static_cast<int>(size);
+
+                // Deterministic variation so empty blocks become realistic urban spaces.
+                const int variant = ((ix / isize) * 5 + (iy / isize) * 3) % 3;
+
+                if (variant == 0)
+                {
+                    // Parking lot.
+                    glColor3f(0.26f, 0.27f, 0.29f);
+                    drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                    glColor3f(0.80f, 0.82f, 0.84f);
+                    drawSolidLine(ix + 3, iy + 3, ix + isize - 4, iy + 3);
+                    drawSolidLine(ix + 3, iy + isize - 4, ix + isize - 4, iy + isize - 4);
+
+                    // Parking bays.
+                    glColor3f(0.90f, 0.90f, 0.88f);
+                    for (int px = ix + 5; px <= ix + isize - 6; px += 5)
+                    {
+                        drawSolidLine(px, iy + 5, px, iy + isize - 6);
+                    }
+                }
+                else if (variant == 1)
+                {
+                    // Small urban plaza.
+                    glColor3f(0.52f, 0.53f, 0.52f);
+                    drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                    // Center paving zone.
+                    glColor3f(0.66f, 0.66f, 0.64f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + 4, isize - 8, isize - 8));
+
+                    // Cross tiles.
+                    glColor3f(0.58f, 0.58f, 0.56f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 1, iy + 4, 2, isize - 8));
+                    drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + (isize / 2) - 1, isize - 8, 2));
+
+                    // Decorative center circle using midpoint circle algorithm output.
+                    glColor3f(0.40f, 0.42f, 0.43f);
+                    const std::vector<glm::vec2> centerCircle = graphics::buildCircleFanVertices(
+                        {static_cast<float>(ix + (isize / 2)), static_cast<float>(iy + (isize / 2))}, 3.0f, 16);
+                    glBegin(GL_TRIANGLE_FAN);
+                    for (const glm::vec2 &vertex : centerCircle)
+                    {
+                        glVertex2f(vertex.x, vertex.y);
+                    }
+                    glEnd();
+                }
+                else
+                {
+                    // Pocket green lot with trees and footpath.
+                    glColor3f(0.21f, 0.49f, 0.22f);
+                    drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
+
+                    glColor3f(0.30f, 0.62f, 0.31f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + 2, isize - 4, isize - 4));
+
+                    // Footpath.
+                    glColor3f(0.77f, 0.74f, 0.66f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 3, iy + (isize / 2) - 1, isize - 6, 2));
+
+                    // Tree trunks.
+                    glColor3f(0.37f, 0.24f, 0.16f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 6, iy + 14, 2, 4));
+                    drawPoints(graphics::buildFilledRectPoints(ix + isize - 8, iy + 9, 2, 4));
+
+                    // Tree canopies.
+                    glColor3f(0.14f, 0.40f, 0.15f);
+                    const std::vector<glm::vec2> canopyA = graphics::buildCircleFanVertices(
+                        {static_cast<float>(ix + 7), static_cast<float>(iy + 13)}, 3.0f, 16);
+                    glBegin(GL_TRIANGLE_FAN);
+                    for (const glm::vec2 &vertex : canopyA)
+                    {
+                        glVertex2f(vertex.x, vertex.y);
+                    }
+                    glEnd();
+
+                    glColor3f(0.16f, 0.45f, 0.18f);
+                    const std::vector<glm::vec2> canopyB = graphics::buildCircleFanVertices(
+                        {static_cast<float>(ix + isize - 7), static_cast<float>(iy + 8)}, 3.0f, 16);
+                    glBegin(GL_TRIANGLE_FAN);
+                    for (const glm::vec2 &vertex : canopyB)
+                    {
+                        glVertex2f(vertex.x, vertex.y);
+                    }
+                    glEnd();
+                }
             }
 
             void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size)
