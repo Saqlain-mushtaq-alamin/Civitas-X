@@ -2,6 +2,9 @@
 
 #include <GL/freeglut.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "graphics/algorithms.h"
 #include "world/city_map.h"
 
@@ -62,17 +65,66 @@ namespace civitasx
 
             void drawPoints(const std::vector<glm::ivec2> &points)
             {
-                // Keep algorithm-based point generation, but draw each point as a 1x1 cell.
-                // This avoids dotted artifacts when the scene is scaled to window size.
-                glBegin(GL_QUADS);
-                for (const glm::ivec2 &point : points)
+                if (points.empty())
                 {
-                    const float x = static_cast<float>(point.x);
-                    const float y = static_cast<float>(point.y);
-                    glVertex2f(x, y);
-                    glVertex2f(x + 1.0f, y);
-                    glVertex2f(x + 1.0f, y + 1.0f);
-                    glVertex2f(x, y + 1.0f);
+                    return;
+                }
+
+                // Merge adjacent pixels on each scanline to avoid micro cracks at zoom.
+                std::vector<glm::ivec2> sortedPoints = points;
+                std::sort(sortedPoints.begin(), sortedPoints.end(), [](const glm::ivec2 &a, const glm::ivec2 &b)
+                          {
+                              if (a.y != b.y)
+                              {
+                                  return a.y < b.y;
+                              }
+                              return a.x < b.x; });
+
+                glBegin(GL_QUADS);
+                std::size_t i = 0;
+                while (i < sortedPoints.size())
+                {
+                    const int y = sortedPoints[i].y;
+                    int spanStartX = sortedPoints[i].x;
+                    int spanEndX = sortedPoints[i].x;
+                    ++i;
+
+                    while (i < sortedPoints.size() && sortedPoints[i].y == y)
+                    {
+                        const int x = sortedPoints[i].x;
+                        if (x <= spanEndX + 1)
+                        {
+                            if (x > spanEndX)
+                            {
+                                spanEndX = x;
+                            }
+                        }
+                        else
+                        {
+                            const float left = static_cast<float>(spanStartX);
+                            const float right = static_cast<float>(spanEndX + 1);
+                            const float top = static_cast<float>(y);
+                            const float bottom = static_cast<float>(y + 1);
+                            glVertex2f(left, top);
+                            glVertex2f(right, top);
+                            glVertex2f(right, bottom);
+                            glVertex2f(left, bottom);
+
+                            spanStartX = x;
+                            spanEndX = x;
+                        }
+
+                        ++i;
+                    }
+
+                    const float left = static_cast<float>(spanStartX);
+                    const float right = static_cast<float>(spanEndX + 1);
+                    const float top = static_cast<float>(y);
+                    const float bottom = static_cast<float>(y + 1);
+                    glVertex2f(left, top);
+                    glVertex2f(right, top);
+                    glVertex2f(right, bottom);
+                    glVertex2f(left, bottom);
                 }
                 glEnd();
             }
@@ -80,6 +132,100 @@ namespace civitasx
             void drawSolidLine(int x0, int y0, int x1, int y1)
             {
                 drawPoints(graphics::buildLinePointsBresenham(x0, y0, x1, y1));
+            }
+
+            void drawSolidLineSupercover(int x0, int y0, int x1, int y1)
+            {
+                const std::vector<glm::ivec2> basePoints = graphics::buildLinePointsBresenham(x0, y0, x1, y1);
+                if (basePoints.empty())
+                {
+                    return;
+                }
+
+                std::vector<glm::ivec2> coverPoints;
+                coverPoints.reserve(basePoints.size() * 2);
+                coverPoints.push_back(basePoints.front());
+
+                for (std::size_t i = 1; i < basePoints.size(); ++i)
+                {
+                    const glm::ivec2 prev = basePoints[i - 1];
+                    const glm::ivec2 curr = basePoints[i];
+
+                    const int dx = curr.x - prev.x;
+                    const int dy = curr.y - prev.y;
+
+                    if (dx != 0 && dy != 0)
+                    {
+                        // Add one connector pixel on diagonal transitions to avoid dotted edges.
+                        coverPoints.push_back({curr.x, prev.y});
+                    }
+
+                    coverPoints.push_back(curr);
+                }
+
+                drawPoints(coverPoints);
+            }
+
+            void drawFilledTriangleBresenham(int x0, int y0, int x1, int y1, int x2, int y2)
+            {
+                const int minY = std::min(y0, std::min(y1, y2));
+                const int maxY = std::max(y0, std::max(y1, y2));
+
+                if (minY > maxY)
+                {
+                    return;
+                }
+
+                const int spanCount = (maxY - minY) + 1;
+                std::vector<int> minXs(static_cast<std::size_t>(spanCount), std::numeric_limits<int>::max());
+                std::vector<int> maxXs(static_cast<std::size_t>(spanCount), std::numeric_limits<int>::min());
+
+                const auto stampEdge = [&](const std::vector<glm::ivec2> &edge)
+                {
+                    for (const glm::ivec2 &point : edge)
+                    {
+                        const int idx = point.y - minY;
+                        if (idx < 0 || idx >= spanCount)
+                        {
+                            continue;
+                        }
+
+                        const std::size_t row = static_cast<std::size_t>(idx);
+                        if (point.x < minXs[row])
+                        {
+                            minXs[row] = point.x;
+                        }
+                        if (point.x > maxXs[row])
+                        {
+                            maxXs[row] = point.x;
+                        }
+                    }
+                };
+
+                stampEdge(graphics::buildLinePointsBresenham(x0, y0, x1, y1));
+                stampEdge(graphics::buildLinePointsBresenham(x1, y1, x2, y2));
+                stampEdge(graphics::buildLinePointsBresenham(x2, y2, x0, y0));
+
+                for (int y = minY; y <= maxY; ++y)
+                {
+                    const std::size_t row = static_cast<std::size_t>(y - minY);
+                    if (minXs[row] <= maxXs[row])
+                    {
+                        drawSolidLine(minXs[row], y, maxXs[row], y);
+                    }
+                }
+            }
+
+            void drawQuad(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3)
+            {
+                // Fill as two triangles so walls/roofs stay solid at integer pixel resolution.
+                drawFilledTriangleBresenham(x0, y0, x1, y1, x2, y2);
+                drawFilledTriangleBresenham(x0, y0, x2, y2, x3, y3);
+            }
+
+            void drawTriangle(int x0, int y0, int x1, int y1, int x2, int y2)
+            {
+                drawFilledTriangleBresenham(x0, y0, x1, y1, x2, y2);
             }
 
             void drawDashedLine(int x0, int y0, int x1, int y1, int dashLength, int gapLength)
@@ -306,92 +452,160 @@ namespace civitasx
 
                 if (style == BuildingStyle::Office)
                 {
-                    // Office lot base.
-                    glColor3f(0.20f, 0.23f, 0.26f);
+                    // Ground pad around the office to anchor the perspective building.
+                    glColor3f(0.24f, 0.26f, 0.28f);
                     drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
 
-                    // Main tower body.
-                    const int towerX = ix + 5;
-                    const int towerY = iy + 3;
-                    const int towerW = isize - 10;
-                    const int towerH = isize - 6;
-                    glColor3f(0.16f, 0.26f, 0.37f);
-                    drawPoints(graphics::buildFilledRectPoints(towerX, towerY, towerW, towerH));
+                    glColor3f(0.30f, 0.33f, 0.36f);
+                    drawPoints(graphics::buildFilledRectPoints(ix + 3, iy + isize - 8, isize - 6, 5));
 
-                    // Glass window bands.
-                    glColor3f(0.52f, 0.79f, 0.92f);
-                    for (int yy = towerY + 3; yy <= towerY + towerH - 4; yy += 4)
+                    const int cornerX = ix + (isize / 2);
+                    const int roofTopY = iy + 4;
+                    const int roofEdgeY = iy + 9;
+                    const int wallBottomY = iy + isize - 4;
+
+                    // Cast shadow to give depth.
+                    glColor3f(0.10f, 0.11f, 0.12f);
+                    drawQuad(cornerX, wallBottomY, cornerX + 8, wallBottomY - 3, cornerX + 8, wallBottomY + 2, cornerX, wallBottomY + 4);
+
+                    // Left and right walls from a corner viewpoint.
+                    glColor3f(0.40f, 0.46f, 0.52f);
+                    drawQuad(cornerX - 8, roofEdgeY, cornerX, roofEdgeY + 4, cornerX, wallBottomY, cornerX - 8, wallBottomY - 3);
+
+                    glColor3f(0.27f, 0.31f, 0.37f);
+                    drawQuad(cornerX, roofEdgeY + 4, cornerX + 8, roofEdgeY, cornerX + 8, wallBottomY - 3, cornerX, wallBottomY);
+
+                    // Flat roof visible from above.
+                    glColor3f(0.56f, 0.62f, 0.68f);
+                    drawQuad(cornerX - 8, roofEdgeY, cornerX, roofTopY, cornerX + 8, roofEdgeY, cornerX, roofEdgeY + 4);
+
+                    // Roof trim lines improve edge readability.
+                    glColor3f(0.18f, 0.21f, 0.25f);
+                    drawSolidLineSupercover(cornerX - 8, roofEdgeY, cornerX, roofTopY);
+                    drawSolidLineSupercover(cornerX, roofTopY, cornerX + 8, roofEdgeY);
+                    drawSolidLineSupercover(cornerX - 8, roofEdgeY, cornerX, roofEdgeY + 4);
+                    drawSolidLineSupercover(cornerX, roofEdgeY + 4, cornerX + 8, roofEdgeY);
+
+                    // Reflective window modules on both visible facades.
+                    glColor3f(0.67f, 0.84f, 0.93f);
+                    for (int yy = roofEdgeY + 3; yy <= wallBottomY - 5; yy += 4)
                     {
-                        drawSolidLine(towerX + 2, yy, towerX + towerW - 3, yy);
+                        drawPoints(graphics::buildFilledRectPoints(cornerX - 6, yy, 2, 2));
+                        drawPoints(graphics::buildFilledRectPoints(cornerX - 3, yy + 1, 2, 2));
+
+                        drawPoints(graphics::buildFilledRectPoints(cornerX + 2, yy + 1, 2, 2));
+                        drawPoints(graphics::buildFilledRectPoints(cornerX + 5, yy, 2, 2));
                     }
 
-                    // Vertical mullions.
-                    glColor3f(0.32f, 0.52f, 0.66f);
-                    for (int xx = towerX + 3; xx <= towerX + towerW - 4; xx += 5)
-                    {
-                        drawSolidLine(xx, towerY + 2, xx, towerY + towerH - 3);
-                    }
+                    // Ground floor entrance and side walk.
+                    glColor3f(0.12f, 0.17f, 0.23f);
+                    drawPoints(graphics::buildFilledRectPoints(cornerX - 1, wallBottomY - 5, 2, 5));
 
-                    // Entrance lobby at ground level.
-                    glColor3f(0.74f, 0.86f, 0.92f);
-                    drawPoints(graphics::buildFilledRectPoints(ix + (isize / 2) - 4, iy + isize - 7, 8, 5));
+                    glColor3f(0.70f, 0.72f, 0.74f);
+                    drawPoints(graphics::buildFilledRectPoints(cornerX - 1, wallBottomY, 3, isize - (wallBottomY - iy)));
 
-                    // Subtle rooftop accent strip.
-                    glColor3f(0.11f, 0.18f, 0.25f);
-                    drawPoints(graphics::buildFilledRectPoints(towerX, towerY, towerW, 2));
+                    // Small rooftop HVAC unit for realism.
+                    glColor3f(0.48f, 0.52f, 0.56f);
+                    drawQuad(cornerX + 2, roofEdgeY - 1, cornerX + 4, roofEdgeY - 2, cornerX + 5, roofEdgeY, cornerX + 3, roofEdgeY + 1);
                     return;
                 }
 
-                // Plot background so each house sits on a clean lot.
-                glColor3f(0.24f, 0.30f, 0.22f);
+                // Residential lot base.
+                glColor3f(0.25f, 0.35f, 0.24f);
                 drawPoints(graphics::buildFilledRectPoints(ix, iy, isize, isize));
 
-                // Main house body.
-                const int bodyX = ix + 4;
-                const int bodyY = iy + 10;
-                const int bodyW = isize - 8;
-                const int bodyH = isize - 12;
-                glColor3f(0.84f, 0.77f, 0.67f);
-                drawPoints(graphics::buildFilledRectPoints(bodyX, bodyY, bodyW, bodyH));
+                // Inner lawn.
+                glColor3f(0.32f, 0.48f, 0.31f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 2, iy + 2, isize - 4, isize - 4));
 
-                // Pitched roof made from horizontal spans (triangle fill effect).
-                const int roofTopY = iy + 3;
-                const int roofBaseY = bodyY + 2;
-                const int roofCenterX = ix + (isize / 2);
-                glColor3f(0.56f, 0.22f, 0.18f);
-                for (int yy = roofTopY; yy <= roofBaseY; ++yy)
+                // Boundary fence around lot.
+                glColor3f(0.69f, 0.63f, 0.54f);
+                drawSolidLine(ix + 1, iy + 1, ix + isize - 2, iy + 1);
+                drawSolidLine(ix + 1, iy + isize - 2, ix + isize - 2, iy + isize - 2);
+                drawSolidLine(ix + 1, iy + 1, ix + 1, iy + isize - 2);
+                drawSolidLine(ix + isize - 2, iy + 1, ix + isize - 2, iy + isize - 2);
+
+                // Smaller corner-view house.
+                const int cornerX = ix + (isize / 2) + 1;
+                const int roofApexY = iy + 8;
+                const int roofEdgeY = iy + 12;
+                const int wallTopY = iy + 14;
+                const int wallBottomY = iy + isize - 6;
+
+                glColor3f(0.88f, 0.80f, 0.70f);
+                drawQuad(cornerX - 5, wallTopY, cornerX, wallTopY + 2, cornerX, wallBottomY, cornerX - 5, wallBottomY - 2);
+
+                glColor3f(0.78f, 0.70f, 0.60f);
+                drawQuad(cornerX, wallTopY + 2, cornerX + 5, wallTopY, cornerX + 5, wallBottomY - 2, cornerX, wallBottomY);
+
+                // Roof planes.
+                glColor3f(0.62f, 0.24f, 0.20f);
+                drawTriangle(cornerX - 6, roofEdgeY, cornerX, roofApexY, cornerX, wallTopY + 1);
+
+                glColor3f(0.47f, 0.17f, 0.14f);
+                drawTriangle(cornerX, roofApexY, cornerX + 6, roofEdgeY, cornerX, wallTopY + 1);
+
+                // Roof/wall edge definition.
+                glColor3f(0.32f, 0.12f, 0.10f);
+                drawSolidLineSupercover(cornerX - 6, roofEdgeY, cornerX, roofApexY);
+                drawSolidLineSupercover(cornerX, roofApexY, cornerX + 6, roofEdgeY);
+                drawSolidLineSupercover(cornerX - 6, roofEdgeY, cornerX, wallTopY + 1);
+                drawSolidLineSupercover(cornerX, wallTopY + 1, cornerX + 6, roofEdgeY);
+
+                // Door and windows.
+                glColor3f(0.35f, 0.24f, 0.17f);
+                drawPoints(graphics::buildFilledRectPoints(cornerX - 1, wallBottomY - 4, 2, 4));
+
+                glColor3f(0.74f, 0.88f, 0.95f);
+                drawPoints(graphics::buildFilledRectPoints(cornerX - 4, wallTopY + 3, 2, 2));
+                drawPoints(graphics::buildFilledRectPoints(cornerX + 2, wallTopY + 4, 2, 2));
+
+                // Walkway to lot gate.
+                glColor3f(0.69f, 0.68f, 0.64f);
+                drawPoints(graphics::buildFilledRectPoints(cornerX, wallBottomY, 2, isize - (wallBottomY - iy) - 2));
+
+                // Small backyard pool.
+                glColor3f(0.21f, 0.59f, 0.84f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 3, iy + 4, 6, 4));
+                glColor3f(0.54f, 0.78f, 0.92f);
+                drawPoints(graphics::buildFilledRectPoints(ix + 4, iy + 5, 4, 2));
+
+                // Swing set.
+                const int swingBaseY = iy + isize - 5;
+                glColor3f(0.52f, 0.40f, 0.32f);
+                drawSolidLine(ix + 4, swingBaseY, ix + 6, swingBaseY - 4);
+                drawSolidLine(ix + 10, swingBaseY, ix + 8, swingBaseY - 4);
+                drawSolidLine(ix + 6, swingBaseY - 4, ix + 8, swingBaseY - 4);
+
+                glColor3f(0.24f, 0.24f, 0.24f);
+                drawSolidLine(ix + 6, swingBaseY - 4, ix + 6, swingBaseY - 2);
+                drawSolidLine(ix + 8, swingBaseY - 4, ix + 8, swingBaseY - 2);
+                drawPoints(graphics::buildFilledRectPoints(ix + 6, swingBaseY - 2, 3, 1));
+
+                // Two decorative trees.
+                glColor3f(0.39f, 0.25f, 0.17f);
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 7, iy + 5, 2, 4));
+                drawPoints(graphics::buildFilledRectPoints(ix + isize - 6, iy + isize - 9, 2, 4));
+
+                glColor3f(0.15f, 0.43f, 0.18f);
+                const std::vector<glm::vec2> treeA = graphics::buildCircleFanVertices(
+                    {static_cast<float>(ix + isize - 6), static_cast<float>(iy + 5)}, 3.0f, 16);
+                glBegin(GL_TRIANGLE_FAN);
+                for (const glm::vec2 &vertex : treeA)
                 {
-                    const int roofHalfWidth = (yy - roofTopY) + 1;
-                    const int leftX = roofCenterX - roofHalfWidth;
-                    const int rightX = roofCenterX + roofHalfWidth;
-                    drawSolidLine(leftX, yy, rightX, yy);
+                    glVertex2f(vertex.x, vertex.y);
                 }
+                glEnd();
 
-                // Roof edge line for cleaner shape.
-                glColor3f(0.44f, 0.16f, 0.13f);
-                drawSolidLine(bodyX - 1, roofBaseY, bodyX + bodyW, roofBaseY);
-
-                // Door.
-                const int doorW = 4;
-                const int doorH = 7;
-                const int doorX = ix + (isize / 2) - (doorW / 2);
-                const int doorY = iy + isize - doorH - 1;
-                glColor3f(0.31f, 0.20f, 0.14f);
-                drawPoints(graphics::buildFilledRectPoints(doorX, doorY, doorW, doorH));
-
-                // Windows.
-                glColor3f(0.72f, 0.86f, 0.94f);
-                drawPoints(graphics::buildFilledRectPoints(bodyX + 2, bodyY + 4, 4, 3));
-                drawPoints(graphics::buildFilledRectPoints(bodyX + bodyW - 6, bodyY + 4, 4, 3));
-
-                // Window frames.
-                glColor3f(0.52f, 0.46f, 0.38f);
-                drawSolidLine(bodyX + 4, bodyY + 4, bodyX + 4, bodyY + 6);
-                drawSolidLine(bodyX + bodyW - 4, bodyY + 4, bodyX + bodyW - 4, bodyY + 6);
-
-                // Small walkway from door to lot edge.
-                glColor3f(0.62f, 0.62f, 0.60f);
-                drawPoints(graphics::buildFilledRectPoints(doorX + 1, doorY + doorH, 2, isize - (doorY + doorH - iy)));
+                glColor3f(0.17f, 0.47f, 0.20f);
+                const std::vector<glm::vec2> treeB = graphics::buildCircleFanVertices(
+                    {static_cast<float>(ix + isize - 5), static_cast<float>(iy + isize - 9)}, 3.0f, 16);
+                glBegin(GL_TRIANGLE_FAN);
+                for (const glm::vec2 &vertex : treeB)
+                {
+                    glVertex2f(vertex.x, vertex.y);
+                }
+                glEnd();
             }
 
             void drawPark(float x, float y, float size)
@@ -450,9 +664,6 @@ namespace civitasx
 
         void Renderer::render(int viewportWidth, int viewportHeight) const
         {
-            glViewport(0, 0, (viewportWidth <= 0) ? 1 : viewportWidth, (viewportHeight <= 0) ? 1 : viewportHeight);
-            glClear(GL_COLOR_BUFFER_BIT);
-
             static world::CityMap cityMap;
             static bool initialized = false;
             if (!initialized)
@@ -467,6 +678,36 @@ namespace civitasx
             const int tilePixels = 28;
             const int mapWidthPixels = static_cast<int>(cols) * tilePixels;
             const int mapHeightPixels = static_cast<int>(rows) * tilePixels;
+
+            const int safeViewportWidth = (viewportWidth <= 0) ? 1 : viewportWidth;
+            const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
+
+            int renderViewportX = 0;
+            int renderViewportY = 0;
+            int renderViewportWidth = safeViewportWidth;
+            int renderViewportHeight = safeViewportHeight;
+
+            // Preserve crisp pixels by preferring integer upscaling and centering the map.
+            if (mapWidthPixels > 0 && mapHeightPixels > 0)
+            {
+                const int scaleX = safeViewportWidth / mapWidthPixels;
+                const int scaleY = safeViewportHeight / mapHeightPixels;
+                const int integerScale = std::min(scaleX, scaleY);
+                if (integerScale >= 1)
+                {
+                    renderViewportWidth = mapWidthPixels * integerScale;
+                    renderViewportHeight = mapHeightPixels * integerScale;
+                    renderViewportX = (safeViewportWidth - renderViewportWidth) / 2;
+                    renderViewportY = (safeViewportHeight - renderViewportHeight) / 2;
+                }
+            }
+
+            glViewport(renderViewportX, renderViewportY, renderViewportWidth, renderViewportHeight);
+            glDisable(GL_BLEND);
+            glDisable(GL_POINT_SMOOTH);
+            glDisable(GL_LINE_SMOOTH);
+            glDisable(GL_POLYGON_SMOOTH);
+            glClear(GL_COLOR_BUFFER_BIT);
 
             glMatrixMode(GL_PROJECTION);
             glLoadIdentity();
