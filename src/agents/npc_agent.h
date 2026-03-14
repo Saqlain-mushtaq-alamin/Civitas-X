@@ -21,7 +21,7 @@ namespace civitasx
         {
             int id = 0;
             glm::vec2 position{0.0f, 0.0f};
-            int money = 100;
+            float money = 100.0f;
             NpcState state = NpcState::Sleeping;
 
             glm::vec2 home{0.0f, 0.0f};
@@ -38,6 +38,10 @@ namespace civitasx
             // Car rental logic
             bool isRentingCar = false;
             int rentedCarId = -1;
+
+            // Pathfinding
+            std::vector<int> pathNodes; // List of node indices in the road graph
+            int currentPathIndex = 0;   // Index of the next node in the path
         };
 
         // Update function for simulation
