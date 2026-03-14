@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "engine/input.h"
 #include "graphics/algorithms.h"
 #include "world/city_map.h"
 
@@ -682,6 +683,14 @@ namespace civitasx
             const int safeViewportWidth = (viewportWidth <= 0) ? 1 : viewportWidth;
             const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
 
+            updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
+            const CameraState camera = cameraState();
+            const float safeZoom = (camera.zoom <= 0.01f) ? 0.01f : camera.zoom;
+
+            const float viewHalfHeight = (static_cast<float>(mapHeightPixels) * 0.5f) / safeZoom;
+            const float viewHalfWidth = viewHalfHeight *
+                                        (static_cast<float>(safeViewportWidth) / static_cast<float>(safeViewportHeight));
+
             // Fill the entire window to avoid letterboxing/pillarboxing.
             glViewport(0, 0, safeViewportWidth, safeViewportHeight);
             glDisable(GL_BLEND);
@@ -692,7 +701,13 @@ namespace civitasx
 
             glMatrixMode(GL_PROJECTION);
             glLoadIdentity();
-            glOrtho(0.0, mapWidthPixels, mapHeightPixels, 0.0, -1.0, 1.0);
+            glOrtho(
+                static_cast<double>(camera.centerX - viewHalfWidth),
+                static_cast<double>(camera.centerX + viewHalfWidth),
+                static_cast<double>(camera.centerY + viewHalfHeight),
+                static_cast<double>(camera.centerY - viewHalfHeight),
+                -1.0,
+                1.0);
 
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
