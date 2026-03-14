@@ -2,12 +2,71 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace civitasx
 {
 
     namespace graphics
     {
+
+        std::vector<glm::ivec2> buildLinePointsBresenham(int x0, int y0, int x1, int y1)
+        {
+            std::vector<glm::ivec2> points;
+
+            // Bresenham uses only integer math, which is ideal for raster-style lab algorithms.
+            const int dx = std::abs(x1 - x0);
+            const int sx = (x0 < x1) ? 1 : -1;
+            const int dy = -std::abs(y1 - y0);
+            const int sy = (y0 < y1) ? 1 : -1;
+            int error = dx + dy;
+
+            int x = x0;
+            int y = y0;
+
+            while (true)
+            {
+                points.push_back({x, y});
+                if (x == x1 && y == y1)
+                {
+                    break;
+                }
+
+                const int twiceError = 2 * error;
+                if (twiceError >= dy)
+                {
+                    error += dy;
+                    x += sx;
+                }
+                if (twiceError <= dx)
+                {
+                    error += dx;
+                    y += sy;
+                }
+            }
+
+            return points;
+        }
+
+        std::vector<glm::ivec2> buildFilledRectPoints(int x, int y, std::int32_t width, std::int32_t height)
+        {
+            std::vector<glm::ivec2> points;
+            if (width <= 0 || height <= 0)
+            {
+                return points;
+            }
+
+            // Fill by scanline: each row is a Bresenham horizontal line.
+            for (std::int32_t row = 0; row < height; ++row)
+            {
+                const int yRow = y + static_cast<int>(row);
+                std::vector<glm::ivec2> line =
+                    buildLinePointsBresenham(x, yRow, x + static_cast<int>(width) - 1, yRow);
+                points.insert(points.end(), line.begin(), line.end());
+            }
+
+            return points;
+        }
 
         namespace
         {

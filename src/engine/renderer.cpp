@@ -2,6 +2,7 @@
 
 #include <GL/freeglut.h>
 
+#include "graphics/algorithms.h"
 #include "world/city_map.h"
 
 namespace civitasx
@@ -13,38 +14,61 @@ namespace civitasx
         namespace
         {
 
-            void drawQuad(float x0, float y0, float x1, float y1)
+            void drawPoints(const std::vector<glm::ivec2> &points)
             {
+                // Keep algorithm-based point generation, but draw each point as a 1x1 cell.
+                // This avoids dotted artifacts when the scene is scaled to window size.
                 glBegin(GL_QUADS);
-                glVertex2f(x0, y0);
-                glVertex2f(x1, y0);
-                glVertex2f(x1, y1);
-                glVertex2f(x0, y1);
+                for (const glm::ivec2 &point : points)
+                {
+                    const float x = static_cast<float>(point.x);
+                    const float y = static_cast<float>(point.y);
+                    glVertex2f(x, y);
+                    glVertex2f(x + 1.0f, y);
+                    glVertex2f(x + 1.0f, y + 1.0f);
+                    glVertex2f(x, y + 1.0f);
+                }
                 glEnd();
             }
 
             void drawEmpty(float x, float y, float size)
             {
                 glColor3f(0.08f, 0.08f, 0.08f);
-                drawQuad(x, y, x + size, y + size);
+                drawPoints(graphics::buildFilledRectPoints(
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(size),
+                    static_cast<int>(size)));
             }
 
             void drawRoad(float x, float y, float size)
             {
                 glColor3f(0.35f, 0.35f, 0.35f);
-                drawQuad(x, y, x + size, y + size);
+                drawPoints(graphics::buildFilledRectPoints(
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(size),
+                    static_cast<int>(size)));
             }
 
             void drawBuilding(float x, float y, float size)
             {
                 glColor3f(0.70f, 0.55f, 0.25f);
-                drawQuad(x, y, x + size, y + size);
+                drawPoints(graphics::buildFilledRectPoints(
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(size),
+                    static_cast<int>(size)));
             }
 
             void drawPark(float x, float y, float size)
             {
                 glColor3f(0.20f, 0.60f, 0.25f);
-                drawQuad(x, y, x + size, y + size);
+                drawPoints(graphics::buildFilledRectPoints(
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(size),
+                    static_cast<int>(size)));
             }
 
         } // namespace
@@ -63,12 +87,15 @@ namespace civitasx
             }
 
             // Setup a simple tile-space camera so each map cell is a 1x1 block.
-            const float cols = static_cast<float>(cityMap.cols());
-            const float rows = static_cast<float>(cityMap.rows());
+            const std::size_t cols = cityMap.cols();
+            const std::size_t rows = cityMap.rows();
+            const int tilePixels = 28;
+            const int mapWidthPixels = static_cast<int>(cols) * tilePixels;
+            const int mapHeightPixels = static_cast<int>(rows) * tilePixels;
 
             glMatrixMode(GL_PROJECTION);
             glLoadIdentity();
-            glOrtho(0.0, cols, rows, 0.0, -1.0, 1.0);
+            glOrtho(0.0, mapWidthPixels, mapHeightPixels, 0.0, -1.0, 1.0);
 
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
@@ -78,9 +105,9 @@ namespace civitasx
             {
                 for (std::size_t col = 0; col < cityMap.cols(); ++col)
                 {
-                    const float x = static_cast<float>(col);
-                    const float y = static_cast<float>(row);
-                    const float tileSize = 1.0f;
+                    const float x = static_cast<float>(static_cast<int>(col) * tilePixels);
+                    const float y = static_cast<float>(static_cast<int>(row) * tilePixels);
+                    const float tileSize = static_cast<float>(tilePixels);
 
                     switch (cityMap.tileAt(row, col))
                     {
@@ -102,21 +129,16 @@ namespace civitasx
 
             // Draw grid lines to make tile boundaries clearly visible.
             glColor3f(0.0f, 0.0f, 0.0f);
-            glLineWidth(2.0f);
-            glBegin(GL_LINES);
-            for (std::size_t row = 0; row <= cityMap.rows(); ++row)
+            for (std::size_t row = 0; row <= rows; ++row)
             {
-                const float y = static_cast<float>(row);
-                glVertex2f(0.0f, y);
-                glVertex2f(cols, y);
+                const int y = static_cast<int>(row) * tilePixels;
+                drawPoints(graphics::buildLinePointsBresenham(0, y, mapWidthPixels - 1, y));
             }
-            for (std::size_t col = 0; col <= cityMap.cols(); ++col)
+            for (std::size_t col = 0; col <= cols; ++col)
             {
-                const float x = static_cast<float>(col);
-                glVertex2f(x, 0.0f);
-                glVertex2f(x, rows);
+                const int x = static_cast<int>(col) * tilePixels;
+                drawPoints(graphics::buildLinePointsBresenham(x, 0, x, mapHeightPixels - 1));
             }
-            glEnd();
         }
 
     } // namespace engine
