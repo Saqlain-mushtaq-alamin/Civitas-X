@@ -1,7 +1,6 @@
 #pragma once
 
 #include "engine/renderer.h"
-#include "systems/simulation_manager.h"
 
 namespace civitasx
 {
@@ -26,7 +25,6 @@ namespace civitasx
         int width_ = 1280;
         int height_ = 720;
         float lastTimeSeconds_ = 0.0f;
-        systems::SimulationManager simulation_;
         engine::Renderer renderer_;
     };
 

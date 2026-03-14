@@ -23,9 +23,8 @@ namespace civitasx
         glutInitWindowSize(width_, height_);
         glutCreateWindow("Civitas-X | Phase 1 - Autonomous Cars");
 
-        glClearColor(0.04f, 0.06f, 0.08f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-        simulation_.initialize();
         engine::registerInputCallbacks();
 
         glutDisplayFunc(&App::displayCallback);
@@ -67,7 +66,7 @@ namespace civitasx
 
     void App::onDisplay()
     {
-        renderer_.render(simulation_, width_, height_);
+        renderer_.render(width_, height_);
         glutSwapBuffers();
     }
 
@@ -81,10 +80,7 @@ namespace civitasx
     void App::onIdle()
     {
         const float now = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
-        const float delta = now - lastTimeSeconds_;
         lastTimeSeconds_ = now;
-
-        simulation_.update((delta > 0.0f) ? delta : 0.0f);
         glutPostRedisplay();
     }
 
