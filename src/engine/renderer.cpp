@@ -7,6 +7,7 @@
 
 #include "engine/input.h"
 #include "graphics/algorithms.h"
+#include "systems/traffic_system.h"
 #include "world/city_map.h"
 
 namespace civitasx
@@ -362,7 +363,7 @@ namespace civitasx
                 }
             }
 
-            void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size)
+            void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size, float simulationSeconds)
             {
                 const int ix = static_cast<int>(x);
                 const int iy = static_cast<int>(y);
@@ -440,6 +441,63 @@ namespace civitasx
                         iy + (isize / 2) - 4,
                         8,
                         8));
+
+                    const systems::IntersectionSignalState signal =
+                        systems::queryIntersectionSignal(
+                            map,
+                            row,
+                            col,
+                            simulationSeconds);
+
+                    const auto drawLamp = [&](int cx, int cy, systems::TrafficLightColor color, bool isActive)
+                    {
+                        float red = 0.15f;
+                        float green = 0.15f;
+                        float blue = 0.15f;
+
+                        if (isActive)
+                        {
+                            if (color == systems::TrafficLightColor::Red)
+                            {
+                                red = 0.95f;
+                                green = 0.18f;
+                                blue = 0.16f;
+                            }
+                            else if (color == systems::TrafficLightColor::Yellow)
+                            {
+                                red = 0.96f;
+                                green = 0.82f;
+                                blue = 0.22f;
+                            }
+                            else
+                            {
+                                red = 0.20f;
+                                green = 0.92f;
+                                blue = 0.26f;
+                            }
+                        }
+
+                        glColor3f(red, green, blue);
+                        drawPoints(graphics::buildFilledRectPoints(cx - 1, cy - 1, 2, 2));
+                    };
+
+                    const auto drawSignalHead = [&](int x0, int y0, systems::TrafficLightColor activeColor)
+                    {
+                        glColor3f(0.12f, 0.12f, 0.13f);
+                        drawPoints(graphics::buildFilledRectPoints(x0, y0, 4, 8));
+
+                        drawLamp(x0 + 2, y0 + 2, systems::TrafficLightColor::Red, activeColor == systems::TrafficLightColor::Red);
+                        drawLamp(x0 + 2, y0 + 4, systems::TrafficLightColor::Yellow, activeColor == systems::TrafficLightColor::Yellow);
+                        drawLamp(x0 + 2, y0 + 6, systems::TrafficLightColor::Green, activeColor == systems::TrafficLightColor::Green);
+                    };
+
+                    // Horizontal approach heads (east/west traffic).
+                    drawSignalHead(ix + 2, iy + (isize / 2) - 4, signal.horizontal);
+                    drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, signal.horizontal);
+
+                    // Vertical approach heads (north/south traffic).
+                    drawSignalHead(ix + (isize / 2) - 2, iy + 2, signal.vertical);
+                    drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, signal.vertical);
                 }
             }
 
@@ -682,6 +740,7 @@ namespace civitasx
 
             const int safeViewportWidth = (viewportWidth <= 0) ? 1 : viewportWidth;
             const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
+            const float simulationSeconds = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
 
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
             const CameraState camera = cameraState();
@@ -726,7 +785,7 @@ namespace civitasx
                     switch (cityMap.tileAt(row, col))
                     {
                     case world::TileType::Road:
-                        drawRoad(cityMap, rowIndex, colIndex, x, y, tileSize);
+                        drawRoad(cityMap, rowIndex, colIndex, x, y, tileSize, simulationSeconds);
                         break;
                     case world::TileType::Building:
                         drawBuilding(cityMap, rowIndex, colIndex, x, y, tileSize);
