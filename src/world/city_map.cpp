@@ -10,15 +10,15 @@ namespace civitasx
         {
             config_ = CityMapConfig{};
 
-            // 10x10 tile layout. A larger active grid makes each tile look smaller on screen.
+            // 20x20 tile layout. A larger active grid makes each tile look smaller on screen.
             // 0 = empty, 1 = road, 2 = building (house/office), 3 = park.
             for (auto &row : map_)
             {
                 row.fill(static_cast<int>(TileType::Empty));
             }
 
-            activeRows_ = 10;
-            activeCols_ = 10;
+            activeRows_ = 20;
+            activeCols_ = 20;
 
             const int layout[10][10] = {
                 {2, 1, 2, 0, 2, 1, 3, 3, 2, 1},
@@ -37,7 +37,7 @@ namespace civitasx
             {
                 for (std::size_t col = 0; col < activeCols_; ++col)
                 {
-                    map_[row][col] = layout[row][col];
+                    map_[row][col] = layout[row % 10][col % 10];
                 }
             }
         }

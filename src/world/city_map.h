@@ -35,8 +35,8 @@ namespace civitasx
             TileType tileAt(std::size_t row, std::size_t col) const;
 
         private:
-            static constexpr std::size_t kMaxRows = 10;
-            static constexpr std::size_t kMaxCols = 10;
+            static constexpr std::size_t kMaxRows = 20;
+            static constexpr std::size_t kMaxCols = 20;
 
             CityMapConfig config_;
             std::array<std::array<int, kMaxCols>, kMaxRows> map_{};

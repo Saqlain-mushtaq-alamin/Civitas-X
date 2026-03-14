@@ -682,27 +682,8 @@ namespace civitasx
             const int safeViewportWidth = (viewportWidth <= 0) ? 1 : viewportWidth;
             const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
 
-            int renderViewportX = 0;
-            int renderViewportY = 0;
-            int renderViewportWidth = safeViewportWidth;
-            int renderViewportHeight = safeViewportHeight;
-
-            // Preserve crisp pixels by preferring integer upscaling and centering the map.
-            if (mapWidthPixels > 0 && mapHeightPixels > 0)
-            {
-                const int scaleX = safeViewportWidth / mapWidthPixels;
-                const int scaleY = safeViewportHeight / mapHeightPixels;
-                const int integerScale = std::min(scaleX, scaleY);
-                if (integerScale >= 1)
-                {
-                    renderViewportWidth = mapWidthPixels * integerScale;
-                    renderViewportHeight = mapHeightPixels * integerScale;
-                    renderViewportX = (safeViewportWidth - renderViewportWidth) / 2;
-                    renderViewportY = (safeViewportHeight - renderViewportHeight) / 2;
-                }
-            }
-
-            glViewport(renderViewportX, renderViewportY, renderViewportWidth, renderViewportHeight);
+            // Fill the entire window to avoid letterboxing/pillarboxing.
+            glViewport(0, 0, safeViewportWidth, safeViewportHeight);
             glDisable(GL_BLEND);
             glDisable(GL_POINT_SMOOTH);
             glDisable(GL_LINE_SMOOTH);
