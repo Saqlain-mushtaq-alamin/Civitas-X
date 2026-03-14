@@ -10,30 +10,36 @@ namespace civitasx
         {
             config_ = CityMapConfig{};
 
-            // 10x10 storage with active 3x3 sample in top-left:
-            // H R O
-            // R R R
-            // P R H
-            // H/O are encoded as Building (2), R=1, P=3.
+            // 10x10 tile layout. A larger active grid makes each tile look smaller on screen.
+            // 0 = empty, 1 = road, 2 = building (house/office), 3 = park.
             for (auto &row : map_)
             {
                 row.fill(static_cast<int>(TileType::Empty));
             }
 
-            activeRows_ = 3;
-            activeCols_ = 3;
+            activeRows_ = 10;
+            activeCols_ = 10;
 
-            map_[0][0] = static_cast<int>(TileType::Building); // H
-            map_[0][1] = static_cast<int>(TileType::Road);     // R
-            map_[0][2] = static_cast<int>(TileType::Building); // O
+            const int layout[10][10] = {
+                {2, 1, 2, 0, 2, 1, 3, 0, 2, 1},
+                {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                {3, 1, 2, 0, 2, 1, 0, 0, 2, 1},
+                {0, 1, 0, 0, 0, 1, 0, 3, 0, 1},
+                {2, 1, 2, 2, 2, 1, 2, 2, 2, 1},
+                {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                {2, 1, 0, 3, 0, 1, 2, 0, 3, 1},
+                {0, 1, 0, 0, 0, 1, 2, 0, 0, 1},
+                {2, 1, 2, 0, 2, 1, 2, 2, 2, 1},
+                {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+            };
 
-            map_[1][0] = static_cast<int>(TileType::Road);
-            map_[1][1] = static_cast<int>(TileType::Road);
-            map_[1][2] = static_cast<int>(TileType::Road);
-
-            map_[2][0] = static_cast<int>(TileType::Park);     // P
-            map_[2][1] = static_cast<int>(TileType::Road);     // R
-            map_[2][2] = static_cast<int>(TileType::Building); // H
+            for (std::size_t row = 0; row < activeRows_; ++row)
+            {
+                for (std::size_t col = 0; col < activeCols_; ++col)
+                {
+                    map_[row][col] = layout[row][col];
+                }
+            }
         }
 
         const CityMapConfig &CityMap::config() const
@@ -72,6 +78,6 @@ namespace civitasx
             }
         }
 
-    }  
+    }
 
-}  
+}
