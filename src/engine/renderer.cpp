@@ -3,8 +3,14 @@
 #include <GL/freeglut.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <random>
+#include <vector>
 
+#include <glm/geometric.hpp>
+
+#include "agents/car_agent.h"
 #include "engine/input.h"
 #include "graphics/algorithms.h"
 #include "systems/traffic_system.h"
@@ -63,6 +69,237 @@ namespace civitasx
                 }
 
                 return BuildingStyle::House;
+            }
+
+            struct CarRuntimeState
+            {
+                bool initialized = false;
+                float lastSimulationSeconds = 0.0f;
+                std::mt19937 rng{17U};
+                std::vector<agents::CarAgent> cars;
+                std::vector<int> currentNodeByCar;
+                std::vector<int> previousNodeByCar;
+                std::vector<glm::vec2> nodeCenters;
+                std::vector<std::vector<int>> adjacency;
+                std::vector<int> nodeByTile;
+                std::size_t nodeRows = 0;
+                std::size_t nodeCols = 0;
+            };
+
+            CarRuntimeState g_carRuntime;
+
+            int tileIndexFor(std::size_t row, std::size_t col, std::size_t cols)
+            {
+                return static_cast<int>((row * cols) + col);
+            }
+
+            bool pickNextNode(int currentNode, int previousNode, int &nextNode)
+            {
+                if (currentNode < 0 || currentNode >= static_cast<int>(g_carRuntime.adjacency.size()))
+                {
+                    return false;
+                }
+
+                const std::vector<int> &neighbors = g_carRuntime.adjacency[static_cast<std::size_t>(currentNode)];
+                if (neighbors.empty())
+                {
+                    return false;
+                }
+
+                std::vector<int> options;
+                options.reserve(neighbors.size());
+                for (int node : neighbors)
+                {
+                    if (node != previousNode)
+                    {
+                        options.push_back(node);
+                    }
+                }
+
+                const std::vector<int> &pool = options.empty() ? neighbors : options;
+                std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1U);
+                nextNode = pool[pick(g_carRuntime.rng)];
+                return true;
+            }
+
+            void initializeCars(const world::CityMap &map, int tilePixels)
+            {
+                if (g_carRuntime.initialized)
+                {
+                    return;
+                }
+
+                g_carRuntime.nodeRows = map.rows();
+                g_carRuntime.nodeCols = map.cols();
+                g_carRuntime.nodeByTile.assign(g_carRuntime.nodeRows * g_carRuntime.nodeCols, -1);
+                g_carRuntime.nodeCenters.clear();
+
+                for (std::size_t row = 0; row < map.rows(); ++row)
+                {
+                    for (std::size_t col = 0; col < map.cols(); ++col)
+                    {
+                        if (map.tileAt(row, col) != world::TileType::Road)
+                        {
+                            continue;
+                        }
+
+                        const int nodeId = static_cast<int>(g_carRuntime.nodeCenters.size());
+                        const int tileIndex = tileIndexFor(row, col, g_carRuntime.nodeCols);
+                        g_carRuntime.nodeByTile[static_cast<std::size_t>(tileIndex)] = nodeId;
+                        g_carRuntime.nodeCenters.push_back(
+                            {static_cast<float>(static_cast<int>(col) * tilePixels + (tilePixels / 2)),
+                             static_cast<float>(static_cast<int>(row) * tilePixels + (tilePixels / 2))});
+                    }
+                }
+
+                g_carRuntime.adjacency.assign(g_carRuntime.nodeCenters.size(), {});
+                const int dRows[4] = {-1, 1, 0, 0};
+                const int dCols[4] = {0, 0, -1, 1};
+
+                for (std::size_t row = 0; row < g_carRuntime.nodeRows; ++row)
+                {
+                    for (std::size_t col = 0; col < g_carRuntime.nodeCols; ++col)
+                    {
+                        const int fromTile = tileIndexFor(row, col, g_carRuntime.nodeCols);
+                        const int fromNode = g_carRuntime.nodeByTile[static_cast<std::size_t>(fromTile)];
+                        if (fromNode < 0)
+                        {
+                            continue;
+                        }
+
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            const int nRow = static_cast<int>(row) + dRows[i];
+                            const int nCol = static_cast<int>(col) + dCols[i];
+                            if (nRow < 0 || nCol < 0)
+                            {
+                                continue;
+                            }
+
+                            const std::size_t neighborRow = static_cast<std::size_t>(nRow);
+                            const std::size_t neighborCol = static_cast<std::size_t>(nCol);
+                            if (neighborRow >= g_carRuntime.nodeRows || neighborCol >= g_carRuntime.nodeCols)
+                            {
+                                continue;
+                            }
+
+                            const int toTile = tileIndexFor(neighborRow, neighborCol, g_carRuntime.nodeCols);
+                            const int toNode = g_carRuntime.nodeByTile[static_cast<std::size_t>(toTile)];
+                            if (toNode >= 0)
+                            {
+                                g_carRuntime.adjacency[static_cast<std::size_t>(fromNode)].push_back(toNode);
+                            }
+                        }
+                    }
+                }
+
+                g_carRuntime.cars.clear();
+                g_carRuntime.currentNodeByCar.clear();
+                g_carRuntime.previousNodeByCar.clear();
+
+                if (!g_carRuntime.nodeCenters.empty())
+                {
+                    const int desiredCars = std::min(48, static_cast<int>(g_carRuntime.nodeCenters.size()));
+                    std::uniform_real_distribution<float> speedDist(32.0f, 62.0f);
+                    std::uniform_int_distribution<std::size_t> startDist(0, g_carRuntime.nodeCenters.size() - 1U);
+
+                    for (int i = 0; i < desiredCars; ++i)
+                    {
+                        const int startNode = static_cast<int>(startDist(g_carRuntime.rng));
+                        agents::CarAgent car = agents::makeDefaultCar(i, g_carRuntime.nodeCenters[static_cast<std::size_t>(startNode)], speedDist(g_carRuntime.rng));
+
+                        int nextNode = startNode;
+                        if (pickNextNode(startNode, -1, nextNode))
+                        {
+                            car.target = g_carRuntime.nodeCenters[static_cast<std::size_t>(nextNode)];
+                            const glm::vec2 heading = car.target - car.position;
+                            if (glm::length(heading) > 0.0001f)
+                            {
+                                car.angle = std::atan2(heading.y, heading.x);
+                            }
+                        }
+
+                        g_carRuntime.cars.push_back(car);
+                        g_carRuntime.currentNodeByCar.push_back(startNode);
+                        g_carRuntime.previousNodeByCar.push_back(-1);
+                    }
+                }
+
+                g_carRuntime.initialized = true;
+            }
+
+            void updateCars(float deltaSeconds)
+            {
+                if (deltaSeconds <= 0.0f)
+                {
+                    return;
+                }
+
+                const float reachThreshold = 0.75f;
+                for (std::size_t i = 0; i < g_carRuntime.cars.size(); ++i)
+                {
+                    agents::CarAgent &car = g_carRuntime.cars[i];
+                    const glm::vec2 toTarget = car.target - car.position;
+                    if (glm::length(toTarget) <= reachThreshold)
+                    {
+                        car.position = car.target;
+
+                        const int currentNode = g_carRuntime.currentNodeByCar[i];
+                        const int previousNode = g_carRuntime.previousNodeByCar[i];
+                        int nextNode = currentNode;
+                        if (pickNextNode(currentNode, previousNode, nextNode))
+                        {
+                            g_carRuntime.previousNodeByCar[i] = currentNode;
+                            g_carRuntime.currentNodeByCar[i] = nextNode;
+                            car.target = g_carRuntime.nodeCenters[static_cast<std::size_t>(nextNode)];
+                        }
+                    }
+
+                    systems::advanceCar(car, deltaSeconds);
+                }
+            }
+
+            void drawCars()
+            {
+                for (const agents::CarAgent &car : g_carRuntime.cars)
+                {
+                    const float cosA = std::cos(car.angle);
+                    const float sinA = std::sin(car.angle);
+                    const glm::vec2 forward{cosA, sinA};
+                    const glm::vec2 right{-sinA, cosA};
+
+                    const float halfLength = 5.5f;
+                    const float halfWidth = 2.8f;
+
+                    const glm::vec2 center = car.position;
+                    const glm::vec2 frontLeft = center + (forward * halfLength) - (right * halfWidth);
+                    const glm::vec2 frontRight = center + (forward * halfLength) + (right * halfWidth);
+                    const glm::vec2 rearRight = center - (forward * halfLength) + (right * halfWidth);
+                    const glm::vec2 rearLeft = center - (forward * halfLength) - (right * halfWidth);
+
+                    // Body color variation by id for visual differentiation.
+                    const float hue = static_cast<float>((car.id * 37) % 100) / 100.0f;
+                    glColor3f(0.30f + (0.5f * hue), 0.22f + (0.35f * (1.0f - hue)), 0.28f + (0.45f * hue));
+                    glBegin(GL_QUADS);
+                    glVertex2f(frontLeft.x, frontLeft.y);
+                    glVertex2f(frontRight.x, frontRight.y);
+                    glVertex2f(rearRight.x, rearRight.y);
+                    glVertex2f(rearLeft.x, rearLeft.y);
+                    glEnd();
+
+                    // Windshield strip.
+                    const glm::vec2 windshieldLeft = center + (forward * 1.8f) - (right * (halfWidth - 0.5f));
+                    const glm::vec2 windshieldRight = center + (forward * 1.8f) + (right * (halfWidth - 0.5f));
+                    const glm::vec2 windshieldRearRight = center + (forward * 0.2f) + (right * (halfWidth - 0.5f));
+                    const glm::vec2 windshieldRearLeft = center + (forward * 0.2f) - (right * (halfWidth - 0.5f));
+                    glColor3f(0.70f, 0.86f, 0.95f);
+                    glBegin(GL_QUADS);
+                    glVertex2f(windshieldLeft.x, windshieldLeft.y);
+                    glVertex2f(windshieldRight.x, windshieldRight.y);
+                    glVertex2f(windshieldRearRight.x, windshieldRearRight.y);
+                    glVertex2f(windshieldRearLeft.x, windshieldRearLeft.y);
+                    glEnd();
+                }
             }
 
             void drawPoints(const std::vector<glm::ivec2> &points)
@@ -742,6 +979,16 @@ namespace civitasx
             const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
             const float simulationSeconds = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
 
+            initializeCars(cityMap, tilePixels);
+            float carDeltaSeconds = simulationSeconds - g_carRuntime.lastSimulationSeconds;
+            if (g_carRuntime.lastSimulationSeconds <= 0.0f)
+            {
+                carDeltaSeconds = 0.0f;
+            }
+            carDeltaSeconds = std::clamp(carDeltaSeconds, 0.0f, 0.05f);
+            updateCars(carDeltaSeconds);
+            g_carRuntime.lastSimulationSeconds = simulationSeconds;
+
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
             const CameraState camera = cameraState();
             const float safeZoom = (camera.zoom <= 0.01f) ? 0.01f : camera.zoom;
@@ -799,6 +1046,8 @@ namespace civitasx
                     }
                 }
             }
+
+            drawCars();
         }
 
     } // namespace engine

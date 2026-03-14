@@ -68,6 +68,7 @@ namespace civitasx
 
             const float step = car.speed * deltaSeconds;
             const glm::vec2 direction = toTarget / distance;
+            car.angle = std::atan2(direction.y, direction.x);
 
             if (step >= distance)
             {
@@ -75,7 +76,8 @@ namespace civitasx
                 return distance;
             }
 
-            car.position += direction * step;
+            car.position.x += step * std::cos(car.angle);
+            car.position.y += step * std::sin(car.angle);
             return step;
         }
 
