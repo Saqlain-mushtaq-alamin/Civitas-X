@@ -80,6 +80,8 @@ namespace civitasx
                 std::vector<int> currentNodeByCar;
                 std::vector<int> previousNodeByCar;
                 std::vector<glm::vec2> nodeCenters;
+                std::vector<int> nodeRowsById;
+                std::vector<int> nodeColsById;
                 std::vector<std::vector<int>> adjacency;
                 std::vector<int> nodeByTile;
                 std::size_t nodeRows = 0;
@@ -133,6 +135,8 @@ namespace civitasx
                 g_carRuntime.nodeCols = map.cols();
                 g_carRuntime.nodeByTile.assign(g_carRuntime.nodeRows * g_carRuntime.nodeCols, -1);
                 g_carRuntime.nodeCenters.clear();
+                g_carRuntime.nodeRowsById.clear();
+                g_carRuntime.nodeColsById.clear();
 
                 for (std::size_t row = 0; row < map.rows(); ++row)
                 {
@@ -149,6 +153,8 @@ namespace civitasx
                         g_carRuntime.nodeCenters.push_back(
                             {static_cast<float>(static_cast<int>(col) * tilePixels + (tilePixels / 2)),
                              static_cast<float>(static_cast<int>(row) * tilePixels + (tilePixels / 2))});
+                        g_carRuntime.nodeRowsById.push_back(static_cast<int>(row));
+                        g_carRuntime.nodeColsById.push_back(static_cast<int>(col));
                     }
                 }
 
@@ -228,13 +234,14 @@ namespace civitasx
                 g_carRuntime.initialized = true;
             }
 
-            void updateCars(float deltaSeconds)
+            void updateCars(float deltaSeconds, const world::CityMap &map, int tilePixels, float simulationSeconds)
             {
                 if (deltaSeconds <= 0.0f)
                 {
                     return;
                 }
 
+                const float laneOffset = 2.2f;
                 const float reachThreshold = 0.75f;
                 for (std::size_t i = 0; i < g_carRuntime.cars.size(); ++i)
                 {
@@ -255,7 +262,137 @@ namespace civitasx
                         }
                     }
 
-                    systems::advanceCar(car, deltaSeconds);
+                    const glm::vec2 toNext = car.target - car.position;
+                    const float distanceToNext = glm::length(toNext);
+                    if (distanceToNext <= 0.0001f)
+                    {
+                        continue;
+                    }
+
+                    const glm::vec2 direction = toNext / distanceToNext;
+                    car.angle = std::atan2(direction.y, direction.x);
+
+                    float speedScale = 1.0f;
+                    float maxTravel = distanceToNext;
+
+                    const int targetNode = g_carRuntime.currentNodeByCar[i];
+                    const int previousNode = g_carRuntime.previousNodeByCar[i];
+                    const bool hasValidTargetNode =
+                        (targetNode >= 0 && targetNode < static_cast<int>(g_carRuntime.nodeCenters.size()));
+                    const bool hasValidPreviousNode =
+                        (previousNode >= 0 && previousNode < static_cast<int>(g_carRuntime.nodeCenters.size()));
+
+                    // Once a car enters an intersection box, keep it flowing through.
+                    bool committedInIntersection = false;
+                    if (hasValidPreviousNode)
+                    {
+                        const int prevRow = g_carRuntime.nodeRowsById[static_cast<std::size_t>(previousNode)];
+                        const int prevCol = g_carRuntime.nodeColsById[static_cast<std::size_t>(previousNode)];
+                        if (systems::isSignalizedIntersection(map, prevRow, prevCol))
+                        {
+                            const float distanceFromPrevCenter =
+                                glm::length(car.position - g_carRuntime.nodeCenters[static_cast<std::size_t>(previousNode)]);
+                            committedInIntersection = (distanceFromPrevCenter <= (static_cast<float>(tilePixels) * 0.7f));
+                        }
+                    }
+
+                    if (hasValidTargetNode && !committedInIntersection)
+                    {
+                        const int targetRow = g_carRuntime.nodeRowsById[static_cast<std::size_t>(targetNode)];
+                        const int targetCol = g_carRuntime.nodeColsById[static_cast<std::size_t>(targetNode)];
+
+                        if (systems::isSignalizedIntersection(map, targetRow, targetCol))
+                        {
+                            const systems::IntersectionSignalState signal =
+                                systems::queryIntersectionSignal(map, targetRow, targetCol, simulationSeconds);
+
+                            const bool horizontalMovement = std::fabs(direction.x) >= std::fabs(direction.y);
+                            const systems::TrafficLightColor activeColor =
+                                horizontalMovement ? signal.horizontal : signal.vertical;
+
+                            const float stopDistance = static_cast<float>(tilePixels) * 0.43f;
+
+                            if (activeColor == systems::TrafficLightColor::Red)
+                            {
+                                speedScale = 0.0f;
+                                maxTravel = std::max(0.0f, distanceToNext - stopDistance);
+                            }
+                            else if (activeColor == systems::TrafficLightColor::Yellow)
+                            {
+                                speedScale = 0.35f;
+                                maxTravel = std::max(0.0f, distanceToNext - (stopDistance - 2.0f));
+                            }
+                        }
+                    }
+
+                    // Simple car-following model to avoid overlap and unrealistic tailgating.
+                    const glm::vec2 right{-direction.y, direction.x};
+                    const glm::vec2 selfLaneCenter = car.position + (right * laneOffset);
+                    float nearestLeadDistance = std::numeric_limits<float>::max();
+                    for (std::size_t j = 0; j < g_carRuntime.cars.size(); ++j)
+                    {
+                        if (j == i)
+                        {
+                            continue;
+                        }
+
+                        const agents::CarAgent &other = g_carRuntime.cars[j];
+                        const glm::vec2 otherForward{std::cos(other.angle), std::sin(other.angle)};
+                        const float directionAlignment = glm::dot(direction, otherForward);
+                        if (directionAlignment < 0.72f)
+                        {
+                            continue;
+                        }
+
+                        const glm::vec2 otherRight{-otherForward.y, otherForward.x};
+                        const glm::vec2 otherLaneCenter = other.position + (otherRight * laneOffset);
+                        const glm::vec2 relative = otherLaneCenter - selfLaneCenter;
+
+                        const float forwardDistance = glm::dot(relative, direction);
+                        if (forwardDistance <= 0.0f)
+                        {
+                            continue;
+                        }
+
+                        const float lateralDistance = std::fabs(glm::dot(relative, right));
+                        if (lateralDistance > 3.7f)
+                        {
+                            continue;
+                        }
+
+                        if (forwardDistance < nearestLeadDistance)
+                        {
+                            nearestLeadDistance = forwardDistance;
+                        }
+                    }
+
+                    if (nearestLeadDistance < std::numeric_limits<float>::max())
+                    {
+                        const float minGap = 10.5f;
+                        const float cautionGap = 26.0f;
+                        if (nearestLeadDistance <= minGap)
+                        {
+                            speedScale = 0.0f;
+                        }
+                        else if (nearestLeadDistance < cautionGap)
+                        {
+                            const float followFactor = (nearestLeadDistance - minGap) / (cautionGap - minGap);
+                            speedScale = std::min(speedScale, followFactor);
+                        }
+                    }
+
+                    float step = car.speed * speedScale * deltaSeconds;
+                    step = std::min(step, maxTravel);
+
+                    if (step >= distanceToNext)
+                    {
+                        car.position = car.target;
+                    }
+                    else if (step > 0.0f)
+                    {
+                        car.position.x += step * std::cos(car.angle);
+                        car.position.y += step * std::sin(car.angle);
+                    }
                 }
             }
 
@@ -271,7 +408,9 @@ namespace civitasx
                     const float halfLength = 5.5f;
                     const float halfWidth = 2.8f;
 
-                    const glm::vec2 center = car.position;
+                    // Keep cars in directional lanes: right-hand side of travel direction.
+                    const float laneOffset = 2.2f;
+                    const glm::vec2 center = car.position + (right * laneOffset);
                     const glm::vec2 frontLeft = center + (forward * halfLength) - (right * halfWidth);
                     const glm::vec2 frontRight = center + (forward * halfLength) + (right * halfWidth);
                     const glm::vec2 rearRight = center - (forward * halfLength) + (right * halfWidth);
@@ -986,7 +1125,7 @@ namespace civitasx
                 carDeltaSeconds = 0.0f;
             }
             carDeltaSeconds = std::clamp(carDeltaSeconds, 0.0f, 0.05f);
-            updateCars(carDeltaSeconds);
+            updateCars(carDeltaSeconds, cityMap, tilePixels, simulationSeconds);
             g_carRuntime.lastSimulationSeconds = simulationSeconds;
 
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
