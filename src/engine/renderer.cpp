@@ -14,6 +14,23 @@ namespace civitasx
         namespace
         {
 
+            bool isRoadTile(const world::CityMap &map, int row, int col)
+            {
+                if (row < 0 || col < 0)
+                {
+                    return false;
+                }
+
+                const std::size_t rowIndex = static_cast<std::size_t>(row);
+                const std::size_t colIndex = static_cast<std::size_t>(col);
+                if (rowIndex >= map.rows() || colIndex >= map.cols())
+                {
+                    return false;
+                }
+
+                return map.tileAt(rowIndex, colIndex) == world::TileType::Road;
+            }
+
             void drawPoints(const std::vector<glm::ivec2> &points)
             {
                 // Keep algorithm-based point generation, but draw each point as a 1x1 cell.
@@ -31,6 +48,51 @@ namespace civitasx
                 glEnd();
             }
 
+            void drawSolidLine(int x0, int y0, int x1, int y1)
+            {
+                drawPoints(graphics::buildLinePointsBresenham(x0, y0, x1, y1));
+            }
+
+            void drawDashedLine(int x0, int y0, int x1, int y1, int dashLength, int gapLength)
+            {
+                if (dashLength <= 0)
+                {
+                    return;
+                }
+
+                // Supports horizontal and vertical lines for lane markings.
+                if (y0 == y1)
+                {
+                    const int start = (x0 < x1) ? x0 : x1;
+                    const int end = (x0 < x1) ? x1 : x0;
+                    for (int s = start; s <= end; s += (dashLength + gapLength))
+                    {
+                        int e = s + dashLength - 1;
+                        if (e > end)
+                        {
+                            e = end;
+                        }
+                        drawSolidLine(s, y0, e, y0);
+                    }
+                    return;
+                }
+
+                if (x0 == x1)
+                {
+                    const int start = (y0 < y1) ? y0 : y1;
+                    const int end = (y0 < y1) ? y1 : y0;
+                    for (int s = start; s <= end; s += (dashLength + gapLength))
+                    {
+                        int e = s + dashLength - 1;
+                        if (e > end)
+                        {
+                            e = end;
+                        }
+                        drawSolidLine(x0, s, x0, e);
+                    }
+                }
+            }
+
             void drawEmpty(float x, float y, float size)
             {
                 glColor3f(0.08f, 0.08f, 0.08f);
@@ -41,14 +103,81 @@ namespace civitasx
                     static_cast<int>(size)));
             }
 
-            void drawRoad(float x, float y, float size)
+            void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size)
             {
-                glColor3f(0.35f, 0.35f, 0.35f);
+                const int ix = static_cast<int>(x);
+                const int iy = static_cast<int>(y);
+                const int isize = static_cast<int>(size);
+
+                // Base asphalt.
+                glColor3f(0.20f, 0.21f, 0.22f);
                 drawPoints(graphics::buildFilledRectPoints(
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(size),
-                    static_cast<int>(size)));
+                    ix,
+                    iy,
+                    isize,
+                    isize));
+
+                // Subtle darker strip in the center adds depth to the road surface.
+                glColor3f(0.16f, 0.17f, 0.18f);
+                drawPoints(graphics::buildFilledRectPoints(
+                    ix + 2,
+                    iy + 2,
+                    isize - 4,
+                    isize - 4));
+
+                // Determine road direction from neighboring road tiles.
+                const bool hasLeft = isRoadTile(map, row, col - 1);
+                const bool hasRight = isRoadTile(map, row, col + 1);
+                const bool hasUp = isRoadTile(map, row - 1, col);
+                const bool hasDown = isRoadTile(map, row + 1, col);
+
+                const bool horizontalRoad = hasLeft || hasRight;
+                const bool verticalRoad = hasUp || hasDown;
+
+                const int laneInset = 5;
+                const int dashLength = 6;
+                const int gapLength = 4;
+
+                if (horizontalRoad || (!horizontalRoad && !verticalRoad))
+                {
+                    const int dividerY = iy + (isize / 2);
+
+                    // White side lane boundaries.
+                    glColor3f(0.92f, 0.92f, 0.92f);
+                    drawSolidLine(ix + 2, iy + laneInset, ix + isize - 3, iy + laneInset);
+                    drawSolidLine(ix + 2, iy + isize - laneInset, ix + isize - 3, iy + isize - laneInset);
+
+                    // Two-way double yellow dashed center divider.
+                    glColor3f(0.94f, 0.84f, 0.20f);
+                    drawDashedLine(ix + 2, dividerY - 1, ix + isize - 3, dividerY - 1, dashLength, gapLength);
+                    drawDashedLine(ix + 2, dividerY + 1, ix + isize - 3, dividerY + 1, dashLength, gapLength);
+                }
+
+                if (verticalRoad)
+                {
+                    const int dividerX = ix + (isize / 2);
+
+                    // White side lane boundaries.
+                    glColor3f(0.92f, 0.92f, 0.92f);
+                    drawSolidLine(ix + laneInset, iy + 2, ix + laneInset, iy + isize - 3);
+                    drawSolidLine(ix + isize - laneInset, iy + 2, ix + isize - laneInset, iy + isize - 3);
+
+                    // Two-way double yellow dashed center divider.
+                    glColor3f(0.94f, 0.84f, 0.20f);
+                    drawDashedLine(dividerX - 1, iy + 2, dividerX - 1, iy + isize - 3, dashLength, gapLength);
+                    drawDashedLine(dividerX + 1, iy + 2, dividerX + 1, iy + isize - 3, dashLength, gapLength);
+                }
+
+                if (horizontalRoad && verticalRoad)
+                {
+                    // Small intersection box to visually blend crossing lane markings.
+                    glColor3f(0.28f, 0.29f, 0.30f);
+                    drawPoints(graphics::buildFilledRectPoints(
+                        ix + (isize / 2) - 4,
+                        iy + (isize / 2) - 4,
+                        8,
+                        8));
+                }
             }
 
             void drawBuilding(float x, float y, float size)
@@ -105,6 +234,8 @@ namespace civitasx
             {
                 for (std::size_t col = 0; col < cityMap.cols(); ++col)
                 {
+                    const int rowIndex = static_cast<int>(row);
+                    const int colIndex = static_cast<int>(col);
                     const float x = static_cast<float>(static_cast<int>(col) * tilePixels);
                     const float y = static_cast<float>(static_cast<int>(row) * tilePixels);
                     const float tileSize = static_cast<float>(tilePixels);
@@ -112,7 +243,7 @@ namespace civitasx
                     switch (cityMap.tileAt(row, col))
                     {
                     case world::TileType::Road:
-                        drawRoad(x, y, tileSize);
+                        drawRoad(cityMap, rowIndex, colIndex, x, y, tileSize);
                         break;
                     case world::TileType::Building:
                         drawBuilding(x, y, tileSize);
