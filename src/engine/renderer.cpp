@@ -117,14 +117,6 @@ namespace civitasx
                     isize,
                     isize));
 
-                // Subtle darker strip in the center adds depth to the road surface.
-                glColor3f(0.16f, 0.17f, 0.18f);
-                drawPoints(graphics::buildFilledRectPoints(
-                    ix + 2,
-                    iy + 2,
-                    isize - 4,
-                    isize - 4));
-
                 // Determine road direction from neighboring road tiles.
                 const bool hasLeft = isRoadTile(map, row, col - 1);
                 const bool hasRight = isRoadTile(map, row, col + 1);
@@ -142,30 +134,42 @@ namespace civitasx
                 {
                     const int dividerY = iy + (isize / 2);
 
-                    // White side lane boundaries.
+                    // White side lane boundaries: only draw outer borders, not between touching road tiles.
                     glColor3f(0.92f, 0.92f, 0.92f);
-                    drawSolidLine(ix + 2, iy + laneInset, ix + isize - 3, iy + laneInset);
-                    drawSolidLine(ix + 2, iy + isize - laneInset, ix + isize - 3, iy + isize - laneInset);
+                    if (!hasUp)
+                    {
+                        drawSolidLine(ix, iy + laneInset, ix + isize - 1, iy + laneInset);
+                    }
+                    if (!hasDown)
+                    {
+                        drawSolidLine(ix, iy + isize - laneInset, ix + isize - 1, iy + isize - laneInset);
+                    }
 
                     // Two-way double yellow dashed center divider.
                     glColor3f(0.94f, 0.84f, 0.20f);
-                    drawDashedLine(ix + 2, dividerY - 1, ix + isize - 3, dividerY - 1, dashLength, gapLength);
-                    drawDashedLine(ix + 2, dividerY + 1, ix + isize - 3, dividerY + 1, dashLength, gapLength);
+                    drawDashedLine(ix, dividerY - 1, ix + isize - 1, dividerY - 1, dashLength, gapLength);
+                    drawDashedLine(ix, dividerY + 1, ix + isize - 1, dividerY + 1, dashLength, gapLength);
                 }
 
                 if (verticalRoad)
                 {
                     const int dividerX = ix + (isize / 2);
 
-                    // White side lane boundaries.
+                    // White side lane boundaries: only draw outer borders, not between touching road tiles.
                     glColor3f(0.92f, 0.92f, 0.92f);
-                    drawSolidLine(ix + laneInset, iy + 2, ix + laneInset, iy + isize - 3);
-                    drawSolidLine(ix + isize - laneInset, iy + 2, ix + isize - laneInset, iy + isize - 3);
+                    if (!hasLeft)
+                    {
+                        drawSolidLine(ix + laneInset, iy, ix + laneInset, iy + isize - 1);
+                    }
+                    if (!hasRight)
+                    {
+                        drawSolidLine(ix + isize - laneInset, iy, ix + isize - laneInset, iy + isize - 1);
+                    }
 
                     // Two-way double yellow dashed center divider.
                     glColor3f(0.94f, 0.84f, 0.20f);
-                    drawDashedLine(dividerX - 1, iy + 2, dividerX - 1, iy + isize - 3, dashLength, gapLength);
-                    drawDashedLine(dividerX + 1, iy + 2, dividerX + 1, iy + isize - 3, dashLength, gapLength);
+                    drawDashedLine(dividerX - 1, iy, dividerX - 1, iy + isize - 1, dashLength, gapLength);
+                    drawDashedLine(dividerX + 1, iy, dividerX + 1, iy + isize - 1, dashLength, gapLength);
                 }
 
                 if (horizontalRoad && verticalRoad)
@@ -256,19 +260,6 @@ namespace civitasx
                         break;
                     }
                 }
-            }
-
-            // Draw grid lines to make tile boundaries clearly visible.
-            glColor3f(0.0f, 0.0f, 0.0f);
-            for (std::size_t row = 0; row <= rows; ++row)
-            {
-                const int y = static_cast<int>(row) * tilePixels;
-                drawPoints(graphics::buildLinePointsBresenham(0, y, mapWidthPixels - 1, y));
-            }
-            for (std::size_t col = 0; col <= cols; ++col)
-            {
-                const int x = static_cast<int>(col) * tilePixels;
-                drawPoints(graphics::buildLinePointsBresenham(x, 0, x, mapHeightPixels - 1));
             }
         }
 
