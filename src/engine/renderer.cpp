@@ -11,6 +11,7 @@
 #include <glm/geometric.hpp>
 
 #include "agents/car_agent.h"
+#include "agents/npc_agent.h"
 #include "ai/pathfinding.h"
 #include "engine/input.h"
 #include "graphics/algorithms.h"
@@ -85,6 +86,25 @@ namespace civitasx
             };
 
             CarRuntimeState g_carRuntime;
+
+            struct NpcRuntimeState
+            {
+                bool initialized = false;
+                float lastSimulationSeconds = 0.0f;
+                std::mt19937 rng{73U};
+                std::vector<agents::NpcAgent> npcs;
+            };
+
+            NpcRuntimeState g_npcRuntime;
+
+            void drawPoints(const std::vector<glm::ivec2> &points);
+
+            glm::vec2 tileCenter(int row, int col, int tilePixels)
+            {
+                return {
+                    static_cast<float>(col * tilePixels + (tilePixels / 2)),
+                    static_cast<float>(row * tilePixels + (tilePixels / 2))};
+            }
 
             bool assignRouteForCar(std::size_t carIndex, int startNode)
             {
@@ -361,6 +381,222 @@ namespace civitasx
                         car.position.x += step * std::cos(car.angle);
                         car.position.y += step * std::sin(car.angle);
                     }
+                }
+            }
+
+            void initializeNpcs(const world::CityMap &map, int tilePixels)
+            {
+                if (g_npcRuntime.initialized)
+                {
+                    return;
+                }
+
+                std::vector<glm::vec2> buildingSpots;
+                std::vector<glm::vec2> foodSpots;
+
+                for (std::size_t row = 0; row < map.rows(); ++row)
+                {
+                    for (std::size_t col = 0; col < map.cols(); ++col)
+                    {
+                        const world::TileType tile = map.tileAt(row, col);
+                        const glm::vec2 center = tileCenter(
+                            static_cast<int>(row),
+                            static_cast<int>(col),
+                            tilePixels);
+
+                        if (tile == world::TileType::Building)
+                        {
+                            buildingSpots.push_back(center);
+                        }
+                        else if (tile == world::TileType::Park || tile == world::TileType::Empty)
+                        {
+                            foodSpots.push_back(center);
+                        }
+                    }
+                }
+
+                if (buildingSpots.empty())
+                {
+                    g_npcRuntime.initialized = true;
+                    return;
+                }
+
+                if (foodSpots.empty())
+                {
+                    foodSpots = buildingSpots;
+                }
+
+                const int npcCount = std::min(36, static_cast<int>(buildingSpots.size()));
+                std::uniform_int_distribution<std::size_t> homeDist(0, buildingSpots.size() - 1U);
+                std::uniform_int_distribution<std::size_t> foodDist(0, foodSpots.size() - 1U);
+
+                for (int i = 0; i < npcCount; ++i)
+                {
+                    const glm::vec2 home = buildingSpots[homeDist(g_npcRuntime.rng)];
+
+                    glm::vec2 work = buildingSpots[homeDist(g_npcRuntime.rng)];
+                    int guard = 0;
+                    while (work == home && guard < 12)
+                    {
+                        work = buildingSpots[homeDist(g_npcRuntime.rng)];
+                        ++guard;
+                    }
+
+                    glm::vec2 food = foodSpots[foodDist(g_npcRuntime.rng)];
+                    guard = 0;
+                    while ((food == home || food == work) && guard < 12)
+                    {
+                        food = foodSpots[foodDist(g_npcRuntime.rng)];
+                        ++guard;
+                    }
+
+                    agents::NpcAgent npc = agents::makeDefaultNpc(i, home);
+                    npc.home = home;
+                    npc.work = work;
+                    npc.food = food;
+                    npc.target = work;
+                    npc.money = 80 + ((i * 17) % 140);
+                    npc.state = agents::NpcState::Sleeping;
+                    npc.cycleStage = 0;
+                    npc.dwellSeconds = 3.0f + static_cast<float>(i % 4);
+                    g_npcRuntime.npcs.push_back(npc);
+                }
+
+                g_npcRuntime.initialized = true;
+            }
+
+            void updateNpcs(float deltaSeconds)
+            {
+                if (deltaSeconds <= 0.0f)
+                {
+                    return;
+                }
+
+                const float walkSpeed = 10.0f;
+                const float travelSpeed = 22.0f;
+
+                for (agents::NpcAgent &npc : g_npcRuntime.npcs)
+                {
+                    if (npc.dwellSeconds > 0.0f)
+                    {
+                        npc.dwellSeconds -= deltaSeconds;
+                        if (npc.dwellSeconds < 0.0f)
+                        {
+                            npc.dwellSeconds = 0.0f;
+                        }
+
+                        if (npc.cycleStage == 0)
+                        {
+                            npc.state = agents::NpcState::Sleeping;
+                        }
+                        else if (npc.cycleStage == 1)
+                        {
+                            npc.state = agents::NpcState::Working;
+                        }
+                        else
+                        {
+                            npc.state = agents::NpcState::Walking;
+                        }
+                        continue;
+                    }
+
+                    const glm::vec2 toTarget = npc.target - npc.position;
+                    const float distance = glm::length(toTarget);
+                    if (distance <= 0.75f)
+                    {
+                        npc.position = npc.target;
+
+                        if (npc.cycleStage == 0)
+                        {
+                            npc.state = agents::NpcState::Working;
+                            npc.money += 20;
+                            npc.dwellSeconds = 10.0f;
+                            npc.target = npc.food;
+                            npc.cycleStage = 1;
+                        }
+                        else if (npc.cycleStage == 1)
+                        {
+                            npc.state = agents::NpcState::Walking;
+                            npc.money = std::max(0, npc.money - 8);
+                            npc.dwellSeconds = 6.0f;
+                            npc.target = npc.home;
+                            npc.cycleStage = 2;
+                        }
+                        else
+                        {
+                            npc.state = agents::NpcState::Sleeping;
+                            npc.dwellSeconds = 12.0f;
+                            npc.target = npc.work;
+                            npc.cycleStage = 0;
+                        }
+
+                        continue;
+                    }
+
+                    const glm::vec2 direction = toTarget / distance;
+                    const float speed = (distance < 12.0f) ? walkSpeed : travelSpeed;
+                    const float step = std::min(speed * deltaSeconds, distance);
+                    npc.position += direction * step;
+                    npc.state = (speed == walkSpeed) ? agents::NpcState::Walking : agents::NpcState::Traveling;
+                }
+            }
+
+            void drawNpcs()
+            {
+                for (const agents::NpcAgent &npc : g_npcRuntime.npcs)
+                {
+                    float r = 0.70f;
+                    float g = 0.74f;
+                    float b = 0.79f;
+
+                    if (npc.state == agents::NpcState::Sleeping)
+                    {
+                        r = 0.43f;
+                        g = 0.47f;
+                        b = 0.66f;
+                    }
+                    else if (npc.state == agents::NpcState::Working)
+                    {
+                        r = 0.88f;
+                        g = 0.64f;
+                        b = 0.26f;
+                    }
+                    else if (npc.state == agents::NpcState::Walking)
+                    {
+                        r = 0.39f;
+                        g = 0.78f;
+                        b = 0.41f;
+                    }
+                    else if (npc.state == agents::NpcState::Traveling)
+                    {
+                        r = 0.89f;
+                        g = 0.35f;
+                        b = 0.29f;
+                    }
+
+                    const int px = static_cast<int>(npc.position.x);
+                    const int py = static_cast<int>(npc.position.y);
+
+                    // Feet shadow.
+                    glColor3f(0.08f, 0.09f, 0.10f);
+                    drawPoints(graphics::buildFilledRectPoints(px - 2, py + 4, 4, 1));
+
+                    // Body.
+                    glColor3f(r, g, b);
+                    drawPoints(graphics::buildFilledRectPoints(px - 2, py - 1, 4, 5));
+
+                    // Head.
+                    glColor3f(0.93f, 0.79f, 0.66f);
+                    const std::vector<glm::vec2> head = graphics::buildCircleFanVertices(
+                        {static_cast<float>(px), static_cast<float>(py - 3)},
+                        2.0f,
+                        12);
+                    glBegin(GL_TRIANGLE_FAN);
+                    for (const glm::vec2 &vertex : head)
+                    {
+                        glVertex2f(vertex.x, vertex.y);
+                    }
+                    glEnd();
                 }
             }
 
@@ -1249,6 +1485,16 @@ namespace civitasx
             updateCars(carDeltaSeconds, cityMap, tilePixels, simulationSeconds);
             g_carRuntime.lastSimulationSeconds = simulationSeconds;
 
+            initializeNpcs(cityMap, tilePixels);
+            float npcDeltaSeconds = simulationSeconds - g_npcRuntime.lastSimulationSeconds;
+            if (g_npcRuntime.lastSimulationSeconds <= 0.0f)
+            {
+                npcDeltaSeconds = 0.0f;
+            }
+            npcDeltaSeconds = std::clamp(npcDeltaSeconds, 0.0f, 0.05f);
+            updateNpcs(npcDeltaSeconds);
+            g_npcRuntime.lastSimulationSeconds = simulationSeconds;
+
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);
             const CameraState camera = cameraState();
             const float safeZoom = (camera.zoom <= 0.01f) ? 0.01f : camera.zoom;
@@ -1319,6 +1565,7 @@ namespace civitasx
                 }
             }
 
+            drawNpcs();
             drawCars();
         }
 
