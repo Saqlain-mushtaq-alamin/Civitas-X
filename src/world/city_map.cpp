@@ -11,7 +11,7 @@ namespace civitasx
             config_ = CityMapConfig{};
 
             // 20x20 tile layout. A larger active grid makes each tile look smaller on screen.
-            // 0 = empty, 1 = road, 2 = building (house/office), 3 = park.
+            // 0 = empty, 1 = road, 3 = park, 4 = home, 5 = office.
             for (auto &row : map_)
             {
                 row.fill(static_cast<int>(TileType::Empty));
@@ -21,14 +21,14 @@ namespace civitasx
             activeCols_ = 20;
 
             const int layout[10][10] = {
-                {2, 1, 2, 0, 2, 1, 3, 3, 2, 1},
+                {4, 1, 4, 0, 4, 1, 3, 3, 5, 1},
                 {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-                {3, 1, 2, 2, 2, 1, 3, 3, 2, 1},
-                {2, 1, 2, 0, 2, 1, 2, 3, 2, 1},
-                {2, 1, 2, 2, 2, 1, 2, 2, 2, 1},
-                {1, 1, 2, 3, 2, 1, 2, 3, 2, 1},
-                {2, 1, 0, 3, 0, 1, 2, 0, 3, 1},
-                {0, 1, 0, 0, 0, 1, 2, 0, 0, 1},
+                {3, 1, 4, 4, 5, 1, 3, 3, 5, 1},
+                {4, 1, 4, 0, 5, 1, 4, 3, 5, 1},
+                {4, 1, 4, 5, 5, 1, 4, 5, 5, 1},
+                {4, 1, 2, 3, 2, 1, 2, 3, 2, 1},
+                {1, 1, 4, 3, 5, 1, 4, 3, 5, 1},
+                {4, 1, 0, 3, 0, 1, 4, 0, 5, 1},
                 {2, 1, 2, 0, 2, 1, 2, 2, 2, 1},
                 {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
             };
@@ -70,12 +70,24 @@ namespace civitasx
             case 1:
                 return TileType::Road;
             case 2:
+            case 4:
+            case 5:
                 return TileType::Building;
             case 3:
                 return TileType::Park;
             default:
                 return TileType::Empty;
             }
+        }
+
+        int CityMap::rawTileAt(std::size_t row, std::size_t col) const
+        {
+            if (row >= activeRows_ || col >= activeCols_)
+            {
+                return static_cast<int>(TileType::Empty);
+            }
+
+            return map_[row][col];
         }
 
     }

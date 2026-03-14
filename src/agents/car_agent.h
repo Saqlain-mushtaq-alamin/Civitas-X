@@ -17,7 +17,15 @@ namespace civitasx
             float angle = 0.0f;
             float battery = 100.0f;
             float wallet = 50.0f;
+
+            // Rental/fueling logic
+            bool isRented = false;
+            int renterNpcId = -1;
+            bool isFueling = false;
         };
+
+        // Update function for simulation
+        void updateCarAgent(CarAgent &car, float deltaSeconds, float distanceTraveled);
 
         CarAgent makeDefaultCar(int id, const glm::vec2 &spawnPosition, float speed);
 

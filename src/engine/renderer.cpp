@@ -747,6 +747,7 @@ namespace civitasx
                     for (std::size_t col = 0; col < map.cols(); ++col)
                     {
                         const world::TileType tile = map.tileAt(row, col);
+                        const int rawTile = map.rawTileAt(row, col);
                         const glm::vec2 center = tileCenter(
                             static_cast<int>(row),
                             static_cast<int>(col),
@@ -755,15 +756,12 @@ namespace civitasx
                         if (tile == world::TileType::Building)
                         {
                             anyBuildingSpots.push_back(center);
-                            const BuildingStyle style = chooseBuildingStyle(
-                                map,
-                                static_cast<int>(row),
-                                static_cast<int>(col));
-                            if (style == BuildingStyle::House)
+
+                            if (rawTile == static_cast<int>(world::TileType::Home))
                             {
                                 houseSpots.push_back(center);
                             }
-                            else
+                            else if (rawTile == static_cast<int>(world::TileType::Office))
                             {
                                 officeSpots.push_back(center);
                             }

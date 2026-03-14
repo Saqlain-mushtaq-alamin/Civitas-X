@@ -14,6 +14,7 @@ namespace civitasx
             Working = 1,
             Walking = 2,
             Traveling = 3,
+            InCar = 4,
         };
 
         struct NpcAgent
@@ -33,7 +34,14 @@ namespace civitasx
             float dwellSeconds = 0.0f;
             bool finalApproach = false;
             bool hasAccessAnchor = false;
+
+            // Car rental logic
+            bool isRentingCar = false;
+            int rentedCarId = -1;
         };
+
+        // Update function for simulation
+        void updateNpcAgent(NpcAgent &npc, float deltaSeconds, const glm::vec2 &destination, bool farDestination);
 
         NpcAgent makeDefaultNpc(int id, const glm::vec2 &spawnPosition);
 

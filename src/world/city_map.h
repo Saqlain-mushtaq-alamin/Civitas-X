@@ -15,6 +15,8 @@ namespace civitasx
             Road = 1,
             Building = 2,
             Park = 3,
+            Home = 4,
+            Office = 5,
         };
 
         struct CityMapConfig
@@ -33,6 +35,7 @@ namespace civitasx
             std::size_t rows() const;
             std::size_t cols() const;
             TileType tileAt(std::size_t row, std::size_t col) const;
+            int rawTileAt(std::size_t row, std::size_t col) const;
 
         private:
             static constexpr std::size_t kMaxRows = 20;
