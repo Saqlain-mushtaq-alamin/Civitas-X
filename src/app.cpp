@@ -25,6 +25,11 @@ namespace civitasx
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
+        // Enable VSync so each swap waits for the monitor's vertical blank.
+        // This stabilises the effective dt to one display-refresh interval and
+        // eliminates the tearing and stutter that an uncapped loop produces.
+        glutSwapInterval(1);
+
         engine::registerInputCallbacks();
 
         glutDisplayFunc(&App::displayCallback);
@@ -79,7 +84,17 @@ namespace civitasx
 
     void App::onIdle()
     {
+        // Only request a redraw once at least one display-refresh interval has
+        // passed.  Without this guard the idle callback fires at CPU speed,
+        // producing thousands of near-zero dt frames per second which makes
+        // every moving object appear to stutter.  1/120 s is half a 60Hz frame
+        // so we don't add visible lag while still keeping dt stable.
+        constexpr float kMinFrameSeconds = 1.0f / 120.0f;
         const float now = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
+        if ((now - lastTimeSeconds_) < kMinFrameSeconds)
+        {
+            return;
+        }
         lastTimeSeconds_ = now;
         glutPostRedisplay();
     }

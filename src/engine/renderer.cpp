@@ -716,8 +716,10 @@ namespace civitasx
                     }
 
                     const float desiredSpeed = car.speed * std::clamp(speedScale, 0.0f, 1.0f);
-                    const float acceleration = 48.0f;
-                    const float braking = 92.0f;
+                    // Higher acceleration keeps the car from creeping after a green; higher
+                    // braking keeps stops crisp without instantly snapping to zero.
+                    const float acceleration = 80.0f;
+                    const float braking = 120.0f;
                     if (car.currentSpeed < desiredSpeed)
                     {
                         car.currentSpeed = std::min(desiredSpeed, car.currentSpeed + (acceleration * deltaSeconds));
@@ -1027,7 +1029,7 @@ namespace civitasx
                         (npc.state == agents::NpcState::Walking) ||
                         (npc.state == agents::NpcState::Traveling);
 
-                    const int legSwing = isMoving ? ((npc.id % 3) - 1) : 0;
+                    const int legSwing = isMoving ? static_cast<int>(std::round(std::sin(g_npcRuntime.lastSimulationSeconds * 6.0f + static_cast<float>(npc.id) * 1.3f) * 2.0f)) : 0;
 
                     const auto drawCircle = [](int cx, int cy, float radius, int segments)
                     {
