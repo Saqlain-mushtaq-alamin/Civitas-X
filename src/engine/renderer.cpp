@@ -101,7 +101,32 @@ namespace civitasx
             NpcRuntimeState g_npcRuntime;
             int g_selectedNpcId = -1;
 
+            struct StaticMapRenderCache
+            {
+                bool valid = false;
+                GLuint displayListId = 0;
+                std::size_t rows = 0U;
+                std::size_t cols = 0U;
+                int tilePixels = 0;
+                int mapWidthPixels = 0;
+                int mapHeightPixels = 0;
+            };
+
+            StaticMapRenderCache g_staticMapCache;
+
             void drawPoints(const std::vector<glm::ivec2> &points);
+            void drawRoad(
+                const world::CityMap &map,
+                int row,
+                int col,
+                float x,
+                float y,
+                float size,
+                float simulationSeconds,
+                bool drawSignals);
+            void drawBuilding(const world::CityMap &map, int row, int col, float x, float y, float size);
+            void drawPark(float x, float y, float size);
+            void drawEmpty(float x, float y, float size);
 
             glm::vec2 tileCenter(int row, int col, int tilePixels)
             {
@@ -1437,105 +1462,6 @@ namespace civitasx
                 }
             }
 
-            void drawSolidRectFast(float x, float y, float w, float h, float r, float g, float b)
-            {
-                glColor3f(r, g, b);
-                glBegin(GL_QUADS);
-                glVertex2f(x, y);
-                glVertex2f(x + w, y);
-                glVertex2f(x + w, y + h);
-                glVertex2f(x, y + h);
-                glEnd();
-            }
-
-            void drawFastTile(
-                const world::CityMap &map,
-                int row,
-                int col,
-                world::TileType tile,
-                float x,
-                float y,
-                float size,
-                float simulationSeconds)
-            {
-                if (tile == world::TileType::Road)
-                {
-                    drawSolidRectFast(x, y, size, size, 0.21f, 0.22f, 0.23f);
-
-                    const bool hasLeft = isRoadTile(map, row, col - 1);
-                    const bool hasRight = isRoadTile(map, row, col + 1);
-                    const bool hasUp = isRoadTile(map, row - 1, col);
-                    const bool hasDown = isRoadTile(map, row + 1, col);
-
-                    const bool horizontalRoad = hasLeft || hasRight;
-                    const bool verticalRoad = hasUp || hasDown;
-
-                    glColor3f(0.92f, 0.90f, 0.50f);
-                    glBegin(GL_LINES);
-                    if (horizontalRoad || (!horizontalRoad && !verticalRoad))
-                    {
-                        const float cy = y + (size * 0.5f);
-                        glVertex2f(x + 2.0f, cy);
-                        glVertex2f(x + size - 2.0f, cy);
-                    }
-                    if (verticalRoad)
-                    {
-                        const float cx = x + (size * 0.5f);
-                        glVertex2f(cx, y + 2.0f);
-                        glVertex2f(cx, y + size - 2.0f);
-                    }
-                    glEnd();
-
-                    if (horizontalRoad && verticalRoad)
-                    {
-                        const systems::IntersectionSignalState signal =
-                            systems::queryIntersectionSignal(map, row, col, simulationSeconds);
-
-                        const float dot = std::max(2.0f, size * 0.08f);
-                        const float cx = x + (size * 0.5f);
-                        const float cy = y + (size * 0.5f);
-
-                        const bool horizontalGreen = (signal.horizontal == systems::TrafficLightColor::Green);
-                        const bool verticalGreen = (signal.vertical == systems::TrafficLightColor::Green);
-
-                        drawSolidRectFast(cx - size * 0.28f, cy - dot * 0.5f, dot, dot,
-                                          horizontalGreen ? 0.20f : 0.88f,
-                                          horizontalGreen ? 0.90f : 0.20f,
-                                          0.18f);
-                        drawSolidRectFast(cx + size * 0.20f, cy - dot * 0.5f, dot, dot,
-                                          horizontalGreen ? 0.20f : 0.88f,
-                                          horizontalGreen ? 0.90f : 0.20f,
-                                          0.18f);
-
-                        drawSolidRectFast(cx - dot * 0.5f, cy - size * 0.28f, dot, dot,
-                                          verticalGreen ? 0.20f : 0.88f,
-                                          verticalGreen ? 0.90f : 0.20f,
-                                          0.18f);
-                        drawSolidRectFast(cx - dot * 0.5f, cy + size * 0.20f, dot, dot,
-                                          verticalGreen ? 0.20f : 0.88f,
-                                          verticalGreen ? 0.90f : 0.20f,
-                                          0.18f);
-                    }
-                    return;
-                }
-
-                if (tile == world::TileType::Building)
-                {
-                    drawSolidRectFast(x, y, size, size, 0.30f, 0.39f, 0.34f);
-                    drawSolidRectFast(x + (size * 0.16f), y + (size * 0.16f), size * 0.68f, size * 0.68f, 0.54f, 0.60f, 0.64f);
-                    return;
-                }
-
-                if (tile == world::TileType::Park)
-                {
-                    drawSolidRectFast(x, y, size, size, 0.20f, 0.58f, 0.24f);
-                    drawSolidRectFast(x + (size * 0.15f), y + (size * 0.15f), size * 0.70f, size * 0.70f, 0.28f, 0.66f, 0.32f);
-                    return;
-                }
-
-                drawSolidRectFast(x, y, size, size, 0.31f, 0.33f, 0.34f);
-            }
-
             void drawEmpty(float x, float y, float size)
             {
                 const int ix = static_cast<int>(x);
@@ -1657,7 +1583,115 @@ namespace civitasx
                 }
             }
 
-            void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size, float simulationSeconds)
+            void drawRoadSignals(
+                const world::CityMap &map,
+                int row,
+                int col,
+                int ix,
+                int iy,
+                int isize,
+                float simulationSeconds)
+            {
+                const bool hasLeft = isRoadTile(map, row, col - 1);
+                const bool hasRight = isRoadTile(map, row, col + 1);
+                const bool hasUp = isRoadTile(map, row - 1, col);
+                const bool hasDown = isRoadTile(map, row + 1, col);
+
+                const bool horizontalRoad = hasLeft || hasRight;
+                const bool verticalRoad = hasUp || hasDown;
+                if (!(horizontalRoad && verticalRoad))
+                {
+                    return;
+                }
+
+                const int roadConnections =
+                    (hasLeft ? 1 : 0) +
+                    (hasRight ? 1 : 0) +
+                    (hasUp ? 1 : 0) +
+                    (hasDown ? 1 : 0);
+
+                const auto drawLamp = [&](int cx, int cy, systems::TrafficLightColor color, bool isActive)
+                {
+                    float red = 0.15f;
+                    float green = 0.15f;
+                    float blue = 0.15f;
+
+                    if (isActive)
+                    {
+                        if (color == systems::TrafficLightColor::Red)
+                        {
+                            red = 0.95f;
+                            green = 0.18f;
+                            blue = 0.16f;
+                        }
+                        else if (color == systems::TrafficLightColor::Yellow)
+                        {
+                            red = 0.96f;
+                            green = 0.82f;
+                            blue = 0.22f;
+                        }
+                        else
+                        {
+                            red = 0.20f;
+                            green = 0.92f;
+                            blue = 0.26f;
+                        }
+                    }
+
+                    glColor3f(red, green, blue);
+                    drawPoints(graphics::buildFilledRectPoints(cx - 1, cy - 1, 2, 2));
+                };
+
+                const auto drawSignalHead = [&](int x0, int y0, systems::TrafficLightColor activeColor)
+                {
+                    glColor3f(0.12f, 0.12f, 0.13f);
+                    drawPoints(graphics::buildFilledRectPoints(x0, y0, 4, 8));
+
+                    drawLamp(x0 + 2, y0 + 2, systems::TrafficLightColor::Red, activeColor == systems::TrafficLightColor::Red);
+                    drawLamp(x0 + 2, y0 + 4, systems::TrafficLightColor::Yellow, activeColor == systems::TrafficLightColor::Yellow);
+                    drawLamp(x0 + 2, y0 + 6, systems::TrafficLightColor::Green, activeColor == systems::TrafficLightColor::Green);
+                };
+
+                if (roadConnections >= 4)
+                {
+                    const systems::IntersectionSignalState signal =
+                        systems::queryIntersectionSignal(
+                            map,
+                            row,
+                            col,
+                            simulationSeconds);
+
+                    // Horizontal approach heads (east/west traffic).
+                    drawSignalHead(ix + 2, iy + (isize / 2) - 4, signal.horizontal);
+                    drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, signal.horizontal);
+
+                    // Vertical approach heads (north/south traffic).
+                    drawSignalHead(ix + (isize / 2) - 2, iy + 2, signal.vertical);
+                    drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, signal.vertical);
+                }
+                else if (roadConnections == 3)
+                {
+                    // For T-junctions, keep all active heads green to avoid broken signal behavior.
+                    if (hasLeft)
+                    {
+                        drawSignalHead(ix + 2, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                    }
+                    if (hasRight)
+                    {
+                        drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                    }
+                    if (hasUp)
+                    {
+                        drawSignalHead(ix + (isize / 2) - 2, iy + 2, systems::TrafficLightColor::Green);
+                    }
+                    if (hasDown)
+                    {
+                        drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, systems::TrafficLightColor::Green);
+                    }
+                }
+            }
+
+            void drawRoad(const world::CityMap &map, int row, int col, float x, float y, float size, float simulationSeconds, bool drawSignals = true)
             {
                 const int ix = static_cast<int>(x);
                 const int iy = static_cast<int>(y);
@@ -1735,91 +1769,111 @@ namespace civitasx
                         iy + (isize / 2) - 4,
                         8,
                         8));
-
-                    const int roadConnections =
-                        (hasLeft ? 1 : 0) +
-                        (hasRight ? 1 : 0) +
-                        (hasUp ? 1 : 0) +
-                        (hasDown ? 1 : 0);
-
-                    const auto drawLamp = [&](int cx, int cy, systems::TrafficLightColor color, bool isActive)
+                    if (drawSignals)
                     {
-                        float red = 0.15f;
-                        float green = 0.15f;
-                        float blue = 0.15f;
-
-                        if (isActive)
-                        {
-                            if (color == systems::TrafficLightColor::Red)
-                            {
-                                red = 0.95f;
-                                green = 0.18f;
-                                blue = 0.16f;
-                            }
-                            else if (color == systems::TrafficLightColor::Yellow)
-                            {
-                                red = 0.96f;
-                                green = 0.82f;
-                                blue = 0.22f;
-                            }
-                            else
-                            {
-                                red = 0.20f;
-                                green = 0.92f;
-                                blue = 0.26f;
-                            }
-                        }
-
-                        glColor3f(red, green, blue);
-                        drawPoints(graphics::buildFilledRectPoints(cx - 1, cy - 1, 2, 2));
-                    };
-
-                    const auto drawSignalHead = [&](int x0, int y0, systems::TrafficLightColor activeColor)
-                    {
-                        glColor3f(0.12f, 0.12f, 0.13f);
-                        drawPoints(graphics::buildFilledRectPoints(x0, y0, 4, 8));
-
-                        drawLamp(x0 + 2, y0 + 2, systems::TrafficLightColor::Red, activeColor == systems::TrafficLightColor::Red);
-                        drawLamp(x0 + 2, y0 + 4, systems::TrafficLightColor::Yellow, activeColor == systems::TrafficLightColor::Yellow);
-                        drawLamp(x0 + 2, y0 + 6, systems::TrafficLightColor::Green, activeColor == systems::TrafficLightColor::Green);
-                    };
-
-                    if (roadConnections >= 4)
-                    {
-                        const systems::IntersectionSignalState signal =
-                            systems::queryIntersectionSignal(
-                                map,
-                                row,
-                                col,
-                                simulationSeconds);
-
-                        // Horizontal approach heads (east/west traffic).
-                        drawSignalHead(ix + 2, iy + (isize / 2) - 4, signal.horizontal);
-                        drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, signal.horizontal);
-
-                        // Vertical approach heads (north/south traffic).
-                        drawSignalHead(ix + (isize / 2) - 2, iy + 2, signal.vertical);
-                        drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, signal.vertical);
+                        drawRoadSignals(map, row, col, ix, iy, isize, simulationSeconds);
                     }
-                    else if (roadConnections == 3)
+                }
+            }
+
+            void ensureStaticMapDisplayList(
+                const world::CityMap &map,
+                int tilePixels,
+                int mapWidthPixels,
+                int mapHeightPixels)
+            {
+                const bool needsRebuild =
+                    (!g_staticMapCache.valid) ||
+                    (g_staticMapCache.rows != map.rows()) ||
+                    (g_staticMapCache.cols != map.cols()) ||
+                    (g_staticMapCache.tilePixels != tilePixels) ||
+                    (g_staticMapCache.mapWidthPixels != mapWidthPixels) ||
+                    (g_staticMapCache.mapHeightPixels != mapHeightPixels);
+
+                if (!needsRebuild)
+                {
+                    return;
+                }
+
+                if (g_staticMapCache.displayListId == 0)
+                {
+                    g_staticMapCache.displayListId = glGenLists(1);
+                }
+
+                if (g_staticMapCache.displayListId == 0)
+                {
+                    g_staticMapCache.valid = false;
+                    return;
+                }
+
+                glNewList(g_staticMapCache.displayListId, GL_COMPILE);
+
+                // Soft atmospheric base tint under the whole city block.
+                glBegin(GL_QUADS);
+                glColor3f(0.11f, 0.15f, 0.18f);
+                glVertex2f(0.0f, 0.0f);
+                glColor3f(0.13f, 0.17f, 0.20f);
+                glVertex2f(static_cast<float>(mapWidthPixels), 0.0f);
+                glColor3f(0.18f, 0.20f, 0.18f);
+                glVertex2f(static_cast<float>(mapWidthPixels), static_cast<float>(mapHeightPixels));
+                glColor3f(0.16f, 0.19f, 0.17f);
+                glVertex2f(0.0f, static_cast<float>(mapHeightPixels));
+                glEnd();
+
+                for (std::size_t row = 0; row < map.rows(); ++row)
+                {
+                    for (std::size_t col = 0; col < map.cols(); ++col)
                     {
-                        // For T-junctions, keep all active heads green to avoid broken signal behavior.
-                        if (hasLeft)
+                        const int rowIndex = static_cast<int>(row);
+                        const int colIndex = static_cast<int>(col);
+                        const float x = static_cast<float>(static_cast<int>(col) * tilePixels);
+                        const float y = static_cast<float>(static_cast<int>(row) * tilePixels);
+                        const float tileSize = static_cast<float>(tilePixels);
+
+                        switch (map.tileAt(row, col))
                         {
-                            drawSignalHead(ix + 2, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                        case world::TileType::Road:
+                            drawRoad(map, rowIndex, colIndex, x, y, tileSize, 0.0f, false);
+                            break;
+                        case world::TileType::Building:
+                            drawBuilding(map, rowIndex, colIndex, x, y, tileSize);
+                            break;
+                        case world::TileType::Park:
+                            drawPark(x, y, tileSize);
+                            break;
+                        default:
+                            drawEmpty(x, y, tileSize);
+                            break;
                         }
-                        if (hasRight)
+                    }
+                }
+
+                glEndList();
+
+                g_staticMapCache.valid = true;
+                g_staticMapCache.rows = map.rows();
+                g_staticMapCache.cols = map.cols();
+                g_staticMapCache.tilePixels = tilePixels;
+                g_staticMapCache.mapWidthPixels = mapWidthPixels;
+                g_staticMapCache.mapHeightPixels = mapHeightPixels;
+            }
+
+            void drawDynamicTrafficSignals(const world::CityMap &map, int tilePixels, float simulationSeconds)
+            {
+                for (std::size_t row = 0; row < map.rows(); ++row)
+                {
+                    for (std::size_t col = 0; col < map.cols(); ++col)
+                    {
+                        if (map.tileAt(row, col) != world::TileType::Road)
                         {
-                            drawSignalHead(ix + isize - 6, iy + (isize / 2) - 4, systems::TrafficLightColor::Green);
+                            continue;
                         }
-                        if (hasUp)
-                        {
-                            drawSignalHead(ix + (isize / 2) - 2, iy + 2, systems::TrafficLightColor::Green);
-                        }
-                        if (hasDown)
-                        {
-                            drawSignalHead(ix + (isize / 2) - 2, iy + isize - 10, systems::TrafficLightColor::Green);
-                        }
+
+                        const int rowIndex = static_cast<int>(row);
+                        const int colIndex = static_cast<int>(col);
+                        const int ix = static_cast<int>(col) * tilePixels;
+                        const int iy = static_cast<int>(row) * tilePixels;
+                        drawRoadSignals(map, rowIndex, colIndex, ix, iy, tilePixels, simulationSeconds);
                     }
                 }
             }
@@ -2196,33 +2250,44 @@ namespace civitasx
             glMatrixMode(GL_MODELVIEW);
             glLoadIdentity();
 
-            // Soft atmospheric base tint under the whole city block.
-            glBegin(GL_QUADS);
-            glColor3f(0.11f, 0.15f, 0.18f);
-            glVertex2f(0.0f, 0.0f);
-            glColor3f(0.13f, 0.17f, 0.20f);
-            glVertex2f(static_cast<float>(mapWidthPixels), 0.0f);
-            glColor3f(0.18f, 0.20f, 0.18f);
-            glVertex2f(static_cast<float>(mapWidthPixels), static_cast<float>(mapHeightPixels));
-            glColor3f(0.16f, 0.19f, 0.17f);
-            glVertex2f(0.0f, static_cast<float>(mapHeightPixels));
-            glEnd();
-
-            // Render tile map by looping through each cell and drawing by type.
-            for (std::size_t row = 0; row < cityMap.rows(); ++row)
+            ensureStaticMapDisplayList(cityMap, tilePixels, mapWidthPixels, mapHeightPixels);
+            if (g_staticMapCache.valid && g_staticMapCache.displayListId != 0)
             {
-                for (std::size_t col = 0; col < cityMap.cols(); ++col)
+                glCallList(g_staticMapCache.displayListId);
+            }
+            else
+            {
+                // Fallback path if display lists are unavailable.
+                for (std::size_t row = 0; row < cityMap.rows(); ++row)
                 {
-                    const int rowIndex = static_cast<int>(row);
-                    const int colIndex = static_cast<int>(col);
-                    const float x = static_cast<float>(static_cast<int>(col) * tilePixels);
-                    const float y = static_cast<float>(static_cast<int>(row) * tilePixels);
-                    const float tileSize = static_cast<float>(tilePixels);
+                    for (std::size_t col = 0; col < cityMap.cols(); ++col)
+                    {
+                        const int rowIndex = static_cast<int>(row);
+                        const int colIndex = static_cast<int>(col);
+                        const float x = static_cast<float>(static_cast<int>(col) * tilePixels);
+                        const float y = static_cast<float>(static_cast<int>(row) * tilePixels);
+                        const float tileSize = static_cast<float>(tilePixels);
 
-                    const world::TileType tile = cityMap.tileAt(row, col);
-                    drawFastTile(cityMap, rowIndex, colIndex, tile, x, y, tileSize, simulationSeconds);
+                        switch (cityMap.tileAt(row, col))
+                        {
+                        case world::TileType::Road:
+                            drawRoad(cityMap, rowIndex, colIndex, x, y, tileSize, simulationSeconds);
+                            break;
+                        case world::TileType::Building:
+                            drawBuilding(cityMap, rowIndex, colIndex, x, y, tileSize);
+                            break;
+                        case world::TileType::Park:
+                            drawPark(x, y, tileSize);
+                            break;
+                        default:
+                            drawEmpty(x, y, tileSize);
+                            break;
+                        }
+                    }
                 }
             }
+
+            drawDynamicTrafficSignals(cityMap, tilePixels, simulationSeconds);
 
             drawNpcs();
             drawCars();
