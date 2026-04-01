@@ -5,7 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 option(CIVITASX_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+option(CIVITASX_ENABLE_ASAN "Enable AddressSanitizer for diagnostics" OFF)
 
 add_executable(civitas_x
     src/main.cpp
@@ -58,6 +63,10 @@ endif()
 
 if(MSVC)
     target_compile_options(civitas_x PRIVATE /W4)
+    if(CIVITASX_ENABLE_ASAN)
+        target_compile_options(civitas_x PRIVATE /fsanitize=address /Zi)
+        target_link_options(civitas_x PRIVATE /fsanitize=address)
+    endif()
     if(CIVITASX_WARNINGS_AS_ERRORS)
         target_compile_options(civitas_x PRIVATE /WX)
     endif()

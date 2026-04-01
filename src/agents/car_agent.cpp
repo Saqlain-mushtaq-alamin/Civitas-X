@@ -13,6 +13,7 @@ namespace civitasx
             car.position = spawnPosition;
             car.target = spawnPosition;
             car.speed = speed;
+            car.currentSpeed = speed;
             car.angle = 0.0f;
             car.battery = 100.0f;
             car.wallet = 50.0f;

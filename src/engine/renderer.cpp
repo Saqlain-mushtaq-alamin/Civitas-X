@@ -653,7 +653,7 @@ namespace civitasx
                             }
                             else if (activeColor == systems::TrafficLightColor::Yellow)
                             {
-                                speedScale = 0.35f;
+                                speedScale = std::min(speedScale, 0.32f);
                                 maxTravel = std::max(0.0f, distanceToNext - (stopDistance - 2.0f));
                             }
                         }
@@ -711,11 +711,23 @@ namespace civitasx
                         else if (nearestLeadDistance < cautionGap)
                         {
                             const float followFactor = (nearestLeadDistance - minGap) / (cautionGap - minGap);
-                            speedScale = std::min(speedScale, followFactor);
+                            speedScale = std::min(speedScale, std::clamp(followFactor, 0.0f, 1.0f));
                         }
                     }
 
-                    float step = car.speed * speedScale * deltaSeconds;
+                    const float desiredSpeed = car.speed * std::clamp(speedScale, 0.0f, 1.0f);
+                    const float acceleration = 48.0f;
+                    const float braking = 92.0f;
+                    if (car.currentSpeed < desiredSpeed)
+                    {
+                        car.currentSpeed = std::min(desiredSpeed, car.currentSpeed + (acceleration * deltaSeconds));
+                    }
+                    else
+                    {
+                        car.currentSpeed = std::max(desiredSpeed, car.currentSpeed - (braking * deltaSeconds));
+                    }
+
+                    float step = car.currentSpeed * deltaSeconds;
                     step = std::min(step, maxTravel);
 
                     if (step >= distanceToNext)
@@ -885,7 +897,7 @@ namespace civitasx
                         {
                             npc.state = agents::NpcState::Working;
                             npc.money += 20;
-                            npc.dwellSeconds = 10.0f;
+                            npc.dwellSeconds = 0.0f;
                             npc.target = npc.food;
                             npc.cycleStage = 1;
                             npc.finalApproach = false;
@@ -894,8 +906,8 @@ namespace civitasx
                         else if (npc.cycleStage == 1)
                         {
                             npc.state = agents::NpcState::Walking;
-                            npc.money = std::max(0, npc.money - 8);
-                            npc.dwellSeconds = 6.0f;
+                            npc.money = std::max(0, static_cast<int>(npc.money - 8));
+                            npc.dwellSeconds = 0.0f;
                             npc.target = npc.home;
                             npc.cycleStage = 2;
                             npc.finalApproach = false;
@@ -904,7 +916,7 @@ namespace civitasx
                         else
                         {
                             npc.state = agents::NpcState::Sleeping;
-                            npc.dwellSeconds = 12.0f;
+                            npc.dwellSeconds = 0.0f;
                             npc.target = npc.work;
                             npc.cycleStage = 0;
                             npc.finalApproach = false;
@@ -1988,6 +2000,7 @@ namespace civitasx
             const int safeViewportWidth = (viewportWidth <= 0) ? 1 : viewportWidth;
             const int safeViewportHeight = (viewportHeight <= 0) ? 1 : viewportHeight;
             const float simulationSeconds = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
+            constexpr float kFixedStepSeconds = 1.0f / 120.0f;
 
             initializeCars(cityMap, tilePixels);
             float carDeltaSeconds = simulationSeconds - g_carRuntime.lastSimulationSeconds;
@@ -1995,8 +2008,14 @@ namespace civitasx
             {
                 carDeltaSeconds = 0.0f;
             }
-            carDeltaSeconds = std::clamp(carDeltaSeconds, 0.0f, 0.05f);
-            updateCars(carDeltaSeconds, cityMap, tilePixels, simulationSeconds);
+            carDeltaSeconds = std::clamp(carDeltaSeconds, 0.0f, 0.25f);
+            float carElapsed = 0.0f;
+            while (carElapsed < carDeltaSeconds)
+            {
+                const float step = std::min(kFixedStepSeconds, carDeltaSeconds - carElapsed);
+                carElapsed += step;
+                updateCars(step, cityMap, tilePixels, simulationSeconds - (carDeltaSeconds - carElapsed));
+            }
             g_carRuntime.lastSimulationSeconds = simulationSeconds;
 
             initializeNpcs(cityMap, tilePixels);
@@ -2005,8 +2024,14 @@ namespace civitasx
             {
                 npcDeltaSeconds = 0.0f;
             }
-            npcDeltaSeconds = std::clamp(npcDeltaSeconds, 0.0f, 0.05f);
-            updateNpcs(npcDeltaSeconds, cityMap, tilePixels);
+            npcDeltaSeconds = std::clamp(npcDeltaSeconds, 0.0f, 0.25f);
+            float npcElapsed = 0.0f;
+            while (npcElapsed < npcDeltaSeconds)
+            {
+                const float step = std::min(kFixedStepSeconds, npcDeltaSeconds - npcElapsed);
+                npcElapsed += step;
+                updateNpcs(step, cityMap, tilePixels);
+            }
             g_npcRuntime.lastSimulationSeconds = simulationSeconds;
 
             updateNavigation(safeViewportWidth, safeViewportHeight, mapWidthPixels, mapHeightPixels);

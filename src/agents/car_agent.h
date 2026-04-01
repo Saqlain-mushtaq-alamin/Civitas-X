@@ -14,6 +14,7 @@ namespace civitasx
             glm::vec2 position{0.0f, 0.0f};
             glm::vec2 target{0.0f, 0.0f};
             float speed = 25.0f;
+            float currentSpeed = 0.0f;
             float angle = 0.0f;
             float battery = 100.0f;
             float wallet = 50.0f;

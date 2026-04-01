@@ -354,7 +354,7 @@ namespace civitasx
                 return;
             }
 
-            dt = clampf(dt, 0.0f, 0.05f);
+            dt = clampf(dt, 0.0f, 0.25f);
 
             const float keyboardX =
                 (g_navigation.moveRight ? 1.0f : 0.0f) - (g_navigation.moveLeft ? 1.0f : 0.0f);
