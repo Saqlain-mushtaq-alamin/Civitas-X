@@ -360,6 +360,14 @@ namespace civitasx
             {
                 switch (state)
                 {
+                case agents::NpcState::Idle:
+                    return "Idle";
+                case agents::NpcState::DecideDestination:
+                    return "Deciding";
+                case agents::NpcState::RequestCar:
+                    return "Requesting Car";
+                case agents::NpcState::WaitingForCar:
+                    return "Waiting For Car";
                 case agents::NpcState::Sleeping:
                     return "Sleeping";
                 case agents::NpcState::Working:
@@ -368,6 +376,10 @@ namespace civitasx
                     return "Walking";
                 case agents::NpcState::Traveling:
                     return "Traveling";
+                case agents::NpcState::InCar:
+                    return "In Car";
+                case agents::NpcState::Arrived:
+                    return "Arrived";
                 default:
                     return "Unknown";
                 }
@@ -1028,6 +1040,30 @@ namespace civitasx
                         g = 0.47f;
                         b = 0.66f;
                     }
+                    else if (npc.state == agents::NpcState::Idle)
+                    {
+                        r = 0.58f;
+                        g = 0.62f;
+                        b = 0.68f;
+                    }
+                    else if (npc.state == agents::NpcState::DecideDestination)
+                    {
+                        r = 0.74f;
+                        g = 0.74f;
+                        b = 0.30f;
+                    }
+                    else if (npc.state == agents::NpcState::RequestCar)
+                    {
+                        r = 0.95f;
+                        g = 0.60f;
+                        b = 0.22f;
+                    }
+                    else if (npc.state == agents::NpcState::WaitingForCar)
+                    {
+                        r = 0.98f;
+                        g = 0.78f;
+                        b = 0.34f;
+                    }
                     else if (npc.state == agents::NpcState::Working)
                     {
                         r = 0.88f;
@@ -1045,6 +1081,18 @@ namespace civitasx
                         r = 0.89f;
                         g = 0.35f;
                         b = 0.29f;
+                    }
+                    else if (npc.state == agents::NpcState::InCar)
+                    {
+                        r = 0.28f;
+                        g = 0.58f;
+                        b = 0.90f;
+                    }
+                    else if (npc.state == agents::NpcState::Arrived)
+                    {
+                        r = 0.30f;
+                        g = 0.83f;
+                        b = 0.64f;
                     }
 
                     const int px = static_cast<int>(npc.position.x);

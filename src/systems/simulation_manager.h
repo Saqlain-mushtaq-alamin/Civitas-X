@@ -34,6 +34,7 @@ namespace civitasx
             ai::RoadGraph roadGraph_;
             std::vector<agents::CarAgent> cars_;
             std::vector<agents::NpcAgent> npcs_;
+            std::vector<int> pendingRideRequests_;
         };
 
     } // namespace systems

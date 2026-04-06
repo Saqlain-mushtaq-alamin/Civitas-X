@@ -1,6 +1,7 @@
 #include "systems/simulation_manager.h"
 
 #include <algorithm>
+#include <limits>
 #include <random>
 
 #include <glm/geometric.hpp>
@@ -38,6 +39,7 @@ namespace civitasx
 
             cars_.clear();
             npcs_.clear();
+            pendingRideRequests_.clear();
 
             if (waypoints_.empty())
             {
@@ -82,9 +84,11 @@ namespace civitasx
                 npc.food = food;
                 npc.target = work;
                 npc.money = 80 + ((i * 11) % 120);
-                npc.state = agents::NpcState::Sleeping;
+                npc.state = agents::NpcState::Idle;
                 npc.cycleStage = 0;
                 npc.dwellSeconds = 4.0f + static_cast<float>(i % 4);
+                npc.assignedCarId = -1;
+                npc.rideRequested = false;
                 npcs_.push_back(npc);
             }
         }
@@ -92,196 +96,324 @@ namespace civitasx
         void SimulationManager::update(float deltaSeconds)
         {
             const float safeDelta = std::max(0.0f, deltaSeconds);
+            const float pickupDistanceThreshold = 1.75f;
+            const float arrivalDistanceThreshold = 1.0f;
+            const float walkSpeed = 11.0f;
+            const float farDestinationThreshold = 120.0f;
 
-            // --- Update Cars ---
+            auto findNpcById = [&](int npcId) -> agents::NpcAgent *
+            {
+                auto it = std::find_if(npcs_.begin(), npcs_.end(), [&](const agents::NpcAgent &npc)
+                                       { return npc.id == npcId; });
+                return (it != npcs_.end()) ? &(*it) : nullptr;
+            };
+
+            auto findCarById = [&](int carId) -> agents::CarAgent *
+            {
+                auto it = std::find_if(cars_.begin(), cars_.end(), [&](const agents::CarAgent &car)
+                                       { return car.id == carId; });
+                return (it != cars_.end()) ? &(*it) : nullptr;
+            };
+
+            auto pickDestinationForNpc = [](const agents::NpcAgent &npc) -> glm::vec2
+            {
+                if (npc.cycleStage == 0)
+                {
+                    return npc.work;
+                }
+                if (npc.cycleStage == 1)
+                {
+                    return npc.food;
+                }
+                return npc.home;
+            };
+
+            // 1) Handle new ride requests.
+            std::vector<int> nextPendingRequests;
+            nextPendingRequests.reserve(pendingRideRequests_.size());
+            for (int npcId : pendingRideRequests_)
+            {
+                agents::NpcAgent *npc = findNpcById(npcId);
+                if (npc == nullptr)
+                {
+                    continue;
+                }
+
+                // Ignore stale requests.
+                if (npc->state != agents::NpcState::WaitingForCar || npc->assignedCarId >= 0)
+                {
+                    npc->rideRequested = false;
+                    continue;
+                }
+
+                int bestCarIndex = -1;
+                float bestDistance = std::numeric_limits<float>::max();
+                for (std::size_t i = 0; i < cars_.size(); ++i)
+                {
+                    const agents::CarAgent &candidate = cars_[i];
+                    if (candidate.state != agents::CarState::Free || candidate.isFueling)
+                    {
+                        continue;
+                    }
+
+                    const float distance = glm::distance(candidate.position, npc->position);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestCarIndex = static_cast<int>(i);
+                    }
+                }
+
+                if (bestCarIndex < 0)
+                {
+                    nextPendingRequests.push_back(npcId);
+                    continue;
+                }
+
+                agents::CarAgent &car = cars_[static_cast<std::size_t>(bestCarIndex)];
+                car.state = agents::CarState::GoToPickup;
+                car.passengerNpcId = npc->id;
+                car.renterNpcId = npc->id;
+                car.isRented = true;
+                car.pickupLocation = npc->position;
+                car.destination = npc->target;
+                car.target = car.pickupLocation;
+
+                npc->assignedCarId = car.id;
+                npc->rideRequested = false;
+                npc->state = agents::NpcState::WaitingForCar;
+            }
+            pendingRideRequests_.swap(nextPendingRequests);
+
+            // 2) Assign cars and update cars.
             for (agents::CarAgent &car : cars_)
             {
                 car.speed = ai::desiredSpeedForCar(car);
-                if (car.position == car.target)
+
+                float distance = 0.0f;
+                switch (car.state)
                 {
-                    car.target = ai::chooseNextWaypoint(rng_, waypoints_, car.position);
+                case agents::CarState::Free:
+                    if (car.position == car.target)
+                    {
+                        car.target = ai::chooseNextWaypoint(rng_, waypoints_, car.position);
+                    }
+                    distance = advanceCar(car, safeDelta);
+                    if (car.position == car.target)
+                    {
+                        car.target = ai::chooseNextWaypoint(rng_, waypoints_, car.position);
+                    }
+                    break;
+                case agents::CarState::Assigned:
+                    car.state = agents::CarState::GoToPickup;
+                    break;
+                case agents::CarState::GoToPickup:
+                    car.target = car.pickupLocation;
+                    distance = advanceCar(car, safeDelta);
+                    if (glm::distance(car.position, car.pickupLocation) <= pickupDistanceThreshold)
+                    {
+                        car.position = car.pickupLocation;
+                        car.state = agents::CarState::WaitForNpc;
+                    }
+                    break;
+                case agents::CarState::WaitForNpc:
+                    // Car waits until NPC enters.
+                    break;
+                case agents::CarState::Transporting:
+                    car.target = car.destination;
+                    distance = advanceCar(car, safeDelta);
+                    if (agents::NpcAgent *passenger = findNpcById(car.passengerNpcId))
+                    {
+                        passenger->position = car.position;
+                    }
+                    if (glm::distance(car.position, car.destination) <= arrivalDistanceThreshold)
+                    {
+                        car.position = car.destination;
+                        if (agents::NpcAgent *passenger = findNpcById(car.passengerNpcId))
+                        {
+                            passenger->position = car.destination;
+                            passenger->state = agents::NpcState::Arrived;
+                            passenger->assignedCarId = -1;
+                            passenger->isRentingCar = false;
+                            passenger->rentedCarId = -1;
+                        }
+
+                        car.state = agents::CarState::Free;
+                        car.passengerNpcId = -1;
+                        car.renterNpcId = -1;
+                        car.isRented = false;
+                        car.destination = car.position;
+                        car.pickupLocation = car.position;
+                        car.target = ai::chooseNextWaypoint(rng_, waypoints_, car.position);
+                    }
+                    break;
                 }
-                float distance = advanceCar(car, deltaSeconds);
+
                 // Car rental/fueling logic
-                agents::updateCarAgent(car, deltaSeconds, distance);
+                agents::updateCarAgent(car, safeDelta, distance);
                 // Economy system: operational costs
                 applyOperationalCosts(car, distance);
-                if (car.position == car.target)
+
+                // Fail-safe: fueling car cannot keep assignments.
+                if (car.isFueling && car.state != agents::CarState::Free)
                 {
+                    if (agents::NpcAgent *passenger = findNpcById(car.passengerNpcId))
+                    {
+                        passenger->assignedCarId = -1;
+                        if (passenger->state == agents::NpcState::InCar)
+                        {
+                            passenger->state = agents::NpcState::WaitingForCar;
+                        }
+                        if (!passenger->rideRequested)
+                        {
+                            pendingRideRequests_.push_back(passenger->id);
+                            passenger->rideRequested = true;
+                        }
+                    }
+                    car.state = agents::CarState::Free;
+                    car.passengerNpcId = -1;
+                    car.renterNpcId = -1;
+                    car.isRented = false;
                     car.target = ai::chooseNextWaypoint(rng_, waypoints_, car.position);
                 }
             }
 
-            const float travelSpeed = 26.0f;
-            const float walkSpeed = 11.0f;
-
-            // --- Update NPCs ---
+            // 3) Update NPCs.
             for (agents::NpcAgent &npc : npcs_)
             {
-                // Handle dwell (sleep, work, eat)
                 if (npc.dwellSeconds > 0.0f)
                 {
                     npc.dwellSeconds -= safeDelta;
-                    if (npc.dwellSeconds < 0.0f)
-                        npc.dwellSeconds = 0.0f;
-                    if (npc.cycleStage == 0)
-                        npc.state = agents::NpcState::Sleeping;
-                    else if (npc.cycleStage == 1)
-                        npc.state = agents::NpcState::Working;
-                    else
-                        npc.state = agents::NpcState::Walking;
-                    // Economy: earn money if working
-                    if (npc.state == agents::NpcState::Working)
-                        npc.money += 1;
-                    continue;
+                    if (npc.dwellSeconds > 0.0f)
+                    {
+                        npc.state = agents::NpcState::Idle;
+                        continue;
+                    }
+                    npc.dwellSeconds = 0.0f;
                 }
 
-                // --- Pathfinding: Compute path if needed ---
-                // If path is empty or target changed, compute new path
-                if (npc.pathNodes.empty() || npc.currentPathIndex >= static_cast<int>(npc.pathNodes.size()) || glm::distance(npc.target, roadGraph_.nodeCenters[npc.pathNodes.back()]) > 1.0f)
+                if (npc.state == agents::NpcState::WaitingForCar)
                 {
-                    // Find closest road node to NPC and to target
-                    int closestStart = -1, closestGoal = -1;
-                    float bestStartDist = 1e9f, bestGoalDist = 1e9f;
-                    for (int i = 0; i < static_cast<int>(roadGraph_.nodeCenters.size()); ++i)
+                    if (npc.assignedCarId < 0)
                     {
-                        float dStart = glm::distance(npc.position, roadGraph_.nodeCenters[i]);
-                        float dGoal = glm::distance(npc.target, roadGraph_.nodeCenters[i]);
-                        if (dStart < bestStartDist)
+                        if (!npc.rideRequested)
                         {
-                            bestStartDist = dStart;
-                            closestStart = i;
-                        }
-                        if (dGoal < bestGoalDist)
-                        {
-                            bestGoalDist = dGoal;
-                            closestGoal = i;
-                        }
-                    }
-                    if (closestStart >= 0 && closestGoal >= 0)
-                    {
-                        npc.pathNodes = ai::findPathAStar(roadGraph_, closestStart, closestGoal);
-                        npc.currentPathIndex = 0;
-                    }
-                }
-
-                // --- Car rental logic ---
-                bool farDestination = false;
-                if (!npc.pathNodes.empty() && npc.currentPathIndex < static_cast<int>(npc.pathNodes.size()))
-                {
-                    // If path is long, consider it far
-                    float totalPathDist = 0.0f;
-                    for (size_t i = 1; i < npc.pathNodes.size(); ++i)
-                        totalPathDist += glm::distance(roadGraph_.nodeCenters[npc.pathNodes[i - 1]], roadGraph_.nodeCenters[npc.pathNodes[i]]);
-                    farDestination = (totalPathDist > 16.0f);
-                }
-                if (farDestination && !npc.isRentingCar)
-                {
-                    // Find available car
-                    int rentedCarId = -1;
-                    for (auto &car : cars_)
-                    {
-                        if (!car.isRented && !car.isFueling)
-                        {
-                            car.isRented = true;
-                            car.renterNpcId = npc.id;
-                            rentedCarId = car.id;
-                            break;
-                        }
-                    }
-                    if (rentedCarId != -1 && npc.money >= 5)
-                    {
-                        npc.isRentingCar = true;
-                        npc.rentedCarId = rentedCarId;
-                        npc.state = agents::NpcState::InCar;
-                        npc.money -= 5; // Pay rent upfront
-                    }
-                }
-
-                // --- Move NPC along path ---
-                if (npc.isRentingCar)
-                {
-                    // Move with car
-                    auto carIt = std::find_if(cars_.begin(), cars_.end(), [&](const agents::CarAgent &car)
-                                              { return car.id == npc.rentedCarId; });
-                    if (carIt != cars_.end())
-                    {
-                        npc.position = carIt->position;
-                        npc.money -= 0.1f * safeDelta;
-                        // If car is fueling or out of battery, stop renting
-                        if (carIt->isFueling || carIt->battery < 10.0f)
-                        {
-                            npc.isRentingCar = false;
-                            npc.rentedCarId = -1;
-                            npc.state = agents::NpcState::Walking;
-                        }
-                        // If arrived at destination, stop renting
-                        else if (!npc.pathNodes.empty() && npc.currentPathIndex >= static_cast<int>(npc.pathNodes.size()) - 1 && glm::distance(npc.position, npc.target) < 1.0f)
-                        {
-                            npc.isRentingCar = false;
-                            npc.rentedCarId = -1;
-                            npc.state = agents::NpcState::Walking;
+                            pendingRideRequests_.push_back(npc.id);
+                            npc.rideRequested = true;
                         }
                         continue;
                     }
+
+                    agents::CarAgent *assignedCar = findCarById(npc.assignedCarId);
+                    if (assignedCar == nullptr)
+                    {
+                        npc.assignedCarId = -1;
+                        if (!npc.rideRequested)
+                        {
+                            pendingRideRequests_.push_back(npc.id);
+                            npc.rideRequested = true;
+                        }
+                        continue;
+                    }
+
+                    const bool carReadyForPickup =
+                        assignedCar->state == agents::CarState::WaitForNpc &&
+                        glm::distance(assignedCar->position, npc.position) <= pickupDistanceThreshold;
+
+                    if (carReadyForPickup)
+                    {
+                        npc.state = agents::NpcState::InCar;
+                        npc.position = assignedCar->position;
+                        npc.isRentingCar = true;
+                        npc.rentedCarId = assignedCar->id;
+
+                        assignedCar->state = agents::CarState::Transporting;
+                        assignedCar->passengerNpcId = npc.id;
+                        assignedCar->destination = npc.target;
+                    }
+                    continue;
+                }
+
+                if (npc.state == agents::NpcState::InCar)
+                {
+                    agents::CarAgent *car = findCarById(npc.assignedCarId);
+                    if (car != nullptr)
+                    {
+                        npc.position = car->position;
+                    }
+                    continue;
+                }
+
+                if (npc.state == agents::NpcState::Idle)
+                {
+                    npc.state = agents::NpcState::DecideDestination;
+                }
+
+                if (npc.state == agents::NpcState::DecideDestination)
+                {
+                    npc.target = pickDestinationForNpc(npc);
+                    const float targetDistance = glm::distance(npc.position, npc.target);
+                    if (targetDistance <= arrivalDistanceThreshold)
+                    {
+                        npc.state = agents::NpcState::Arrived;
+                        continue;
+                    }
+
+                    const bool destinationIsFar = targetDistance > farDestinationThreshold;
+                    if (destinationIsFar)
+                    {
+                        npc.state = agents::NpcState::RequestCar;
+                    }
                     else
                     {
-                        npc.isRentingCar = false;
-                        npc.rentedCarId = -1;
                         npc.state = agents::NpcState::Walking;
                     }
                 }
 
-                // Walk/travel along path
-                if (!npc.pathNodes.empty() && npc.currentPathIndex < static_cast<int>(npc.pathNodes.size()))
+                if (npc.state == agents::NpcState::RequestCar)
                 {
-                    glm::vec2 nextWaypoint = roadGraph_.nodeCenters[npc.pathNodes[npc.currentPathIndex]];
-                    float distToWaypoint = glm::distance(npc.position, nextWaypoint);
-                    float speed = (farDestination ? travelSpeed : walkSpeed);
-                    float step = std::min(speed * safeDelta, distToWaypoint);
-                    if (distToWaypoint <= 0.75f)
+                    if (!npc.rideRequested)
                     {
-                        npc.position = nextWaypoint;
-                        npc.currentPathIndex++;
+                        pendingRideRequests_.push_back(npc.id);
+                        npc.rideRequested = true;
+                    }
+                    npc.state = agents::NpcState::WaitingForCar;
+                    npc.assignedCarId = -1;
+                    continue;
+                }
+
+                if (npc.state == agents::NpcState::Walking)
+                {
+                    const glm::vec2 toTarget = npc.target - npc.position;
+                    const float distance = glm::length(toTarget);
+                    if (distance <= arrivalDistanceThreshold)
+                    {
+                        npc.position = npc.target;
+                        npc.state = agents::NpcState::Arrived;
                     }
                     else
                     {
-                        glm::vec2 direction = (nextWaypoint - npc.position) / distToWaypoint;
+                        const float step = std::min(walkSpeed * safeDelta, distance);
+                        const glm::vec2 direction = toTarget / distance;
                         npc.position += direction * step;
-                        npc.state = (speed == walkSpeed) ? agents::NpcState::Walking : agents::NpcState::Traveling;
+                    }
+                    continue;
+                }
+
+                if (npc.state == agents::NpcState::Arrived)
+                {
+                    if (npc.cycleStage == 0)
+                    {
+                        npc.money += 25.0f;
+                    }
+                    else if (npc.cycleStage == 1)
+                    {
+                        npc.money = std::max(0.0f, npc.money - 10.0f);
                     }
 
-                    // If reached final waypoint and close to target, complete journey
-                    if (npc.currentPathIndex >= static_cast<int>(npc.pathNodes.size()) && glm::distance(npc.position, npc.target) <= 0.75f)
-                    {
-                        npc.position = npc.target;
-                        npc.pathNodes.clear();
-                        npc.currentPathIndex = 0;
-                        // Arrived at destination, handle cycle
-                        if (npc.cycleStage == 0)
-                        {
-                            npc.state = agents::NpcState::Working;
-                            npc.money += 25;
-                            npc.dwellSeconds = 12.0f;
-                            npc.target = npc.food;
-                            npc.cycleStage = 1;
-                        }
-                        else if (npc.cycleStage == 1)
-                        {
-                            npc.state = agents::NpcState::Walking;
-                            npc.money = std::max(0.0f, npc.money - 10.0f);
-                            npc.dwellSeconds = 7.0f;
-                            npc.target = npc.home;
-                            npc.cycleStage = 2;
-                        }
-                        else
-                        {
-                            npc.state = agents::NpcState::Sleeping;
-                            npc.dwellSeconds = 14.0f;
-                            npc.target = npc.work;
-                            npc.cycleStage = 0;
-                        }
-                    }
+                    npc.cycleStage = (npc.cycleStage + 1) % 3;
+                    npc.dwellSeconds = 3.5f + static_cast<float>(npc.id % 3);
+                    npc.state = agents::NpcState::Idle;
                 }
             }
         }

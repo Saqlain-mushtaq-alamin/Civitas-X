@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/vec2.hpp>
+#include <vector>
 
 namespace civitasx
 {
@@ -15,6 +16,11 @@ namespace civitasx
             Walking = 2,
             Traveling = 3,
             InCar = 4,
+            Idle = 5,
+            DecideDestination = 6,
+            RequestCar = 7,
+            WaitingForCar = 8,
+            Arrived = 9,
         };
 
         struct NpcAgent
@@ -38,6 +44,8 @@ namespace civitasx
             // Car rental logic
             bool isRentingCar = false;
             int rentedCarId = -1;
+            int assignedCarId = -1;
+            bool rideRequested = false;
 
             // Pathfinding
             std::vector<int> pathNodes; // List of node indices in the road graph

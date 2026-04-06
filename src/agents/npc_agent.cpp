@@ -15,7 +15,7 @@ namespace civitasx
             npc.id = id;
             npc.position = spawnPosition;
             npc.money = 100;
-            npc.state = NpcState::Sleeping;
+            npc.state = NpcState::Idle;
             npc.home = spawnPosition;
             npc.work = spawnPosition;
             npc.food = spawnPosition;
@@ -25,6 +25,8 @@ namespace civitasx
             npc.dwellSeconds = 0.0f;
             npc.finalApproach = false;
             npc.hasAccessAnchor = false;
+            npc.assignedCarId = -1;
+            npc.rideRequested = false;
             return npc;
         }
 

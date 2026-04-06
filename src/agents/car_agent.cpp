@@ -12,11 +12,15 @@ namespace civitasx
             car.id = id;
             car.position = spawnPosition;
             car.target = spawnPosition;
+            car.pickupLocation = spawnPosition;
+            car.destination = spawnPosition;
             car.speed = speed;
             car.currentSpeed = speed;
             car.angle = 0.0f;
             car.battery = 100.0f;
             car.wallet = 50.0f;
+            car.state = CarState::Free;
+            car.passengerNpcId = -1;
             return car;
         }
 
