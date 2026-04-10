@@ -20,6 +20,7 @@ namespace civitasx
 
     namespace
     {
+        constexpr int kFrameIntervalMs = 1000 / 60;
         constexpr float kIntroLoadDurationSeconds = 1.35f;
         const char *kIntroMusicFilePath = "assets/audio/start_screen_music.wav";
 
@@ -203,10 +204,9 @@ namespace civitasx
 
         glutDisplayFunc(&App::displayCallback);
         glutReshapeFunc(&App::reshapeCallback);
-        glutIdleFunc(&App::idleCallback);
+        glutTimerFunc(kFrameIntervalMs, &App::timerCallback, 0);
 
-        lastTimeSeconds_ = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
-        introStartedSeconds_ = lastTimeSeconds_;
+        introStartedSeconds_ = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
         introLoadProgress_ = 0.0f;
         simulationStarted_ = false;
         startIntroMusic();
@@ -234,11 +234,11 @@ namespace civitasx
         }
     }
 
-    void App::idleCallback()
+    void App::timerCallback(int value)
     {
         if (instance_ != nullptr)
         {
-            instance_->onIdle();
+            instance_->onTimer(value);
         }
     }
 
@@ -294,21 +294,11 @@ namespace civitasx
         glViewport(0, 0, width_, height_);
     }
 
-    void App::onIdle()
+    void App::onTimer(int value)
     {
-        // Only request a redraw once at least one display-refresh interval has
-        // passed.  Without this guard the idle callback fires at CPU speed,
-        // producing thousands of near-zero dt frames per second which makes
-        // every moving object appear to stutter.  1/120 s is half a 60Hz frame
-        // so we don't add visible lag while still keeping dt stable.
-        constexpr float kMinFrameSeconds = 1.0f / 120.0f;
-        const float now = glutGet(GLUT_ELAPSED_TIME) / 1000.0f;
-        if ((now - lastTimeSeconds_) < kMinFrameSeconds)
-        {
-            return;
-        }
-        lastTimeSeconds_ = now;
+        (void)value;
         glutPostRedisplay();
+        glutTimerFunc(kFrameIntervalMs, &App::timerCallback, 0);
     }
 
     void App::drawStartScreen(float elapsedSeconds) const

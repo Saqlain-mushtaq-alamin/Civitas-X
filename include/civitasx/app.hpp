@@ -17,18 +17,17 @@ namespace civitasx
 
         static void displayCallback();
         static void reshapeCallback(int width, int height);
-        static void idleCallback();
+        static void timerCallback(int value);
 
         void onDisplay();
         void onReshape(int width, int height);
-        void onIdle();
+        void onTimer(int value);
         void drawStartScreen(float elapsedSeconds) const;
         void startIntroMusic();
         void stopIntroMusic();
 
         int width_ = 1280;
         int height_ = 720;
-        float lastTimeSeconds_ = 0.0f;
         float introStartedSeconds_ = 0.0f;
         float introLoadProgress_ = 0.0f;
         bool simulationStarted_ = false;
