@@ -1,12 +1,19 @@
 #include "civitasx/app.hpp"
 
 #include "engine/input.h"
+#include "graphics/shape_drawer.h"
 
 #include <GL/freeglut.h>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <string>
+
+#ifdef _WIN32
+#include <mmsystem.h>
+#include <windows.h>
+#endif
 
 namespace civitasx
 {
@@ -14,6 +21,7 @@ namespace civitasx
     namespace
     {
         constexpr float kIntroLoadDurationSeconds = 1.35f;
+        const char *kIntroMusicFilePath = "assets/audio/start_screen_music.wav";
 
         int textWidth(void *font, const std::string &text)
         {
@@ -39,9 +47,136 @@ namespace civitasx
             const float w = static_cast<float>(textWidth(font, text));
             drawText(x - (w * 0.5f), y, text, font);
         }
+
+        void drawCenteredStrokeText(float centerX, float baselineY, const std::string &text, float scale)
+        {
+            float strokeWidth = 0.0f;
+            for (char c : text)
+            {
+                strokeWidth += static_cast<float>(glutStrokeWidth(GLUT_STROKE_ROMAN, c));
+            }
+
+            glPushMatrix();
+            glTranslatef(centerX - ((strokeWidth * scale) * 0.5f), baselineY, 0.0f);
+            // Projection Y grows downward on this screen, so invert Y scale to keep stroke text upright.
+            glScalef(scale, -scale, 1.0f);
+            for (char c : text)
+            {
+                glutStrokeCharacter(GLUT_STROKE_ROMAN, c);
+            }
+            glPopMatrix();
+        }
+
+        void drawDetailedCar(float centerX, float baseY, float bob)
+        {
+            const float bodyWidth = 250.0f;
+            const float bodyHeight = 54.0f;
+            const float halfW = bodyWidth * 0.5f;
+            const float left = centerX - halfW;
+            const float right = centerX + halfW;
+
+            glColor3f(0.86f, 0.30f, 0.20f);
+            glBegin(GL_QUADS);
+            glVertex2f(left + 8.0f, baseY + 35.0f + bob);
+            glVertex2f(right - 10.0f, baseY + 35.0f + bob);
+            glVertex2f(right - 8.0f, baseY + 35.0f + bodyHeight + bob);
+            glVertex2f(left + 4.0f, baseY + 35.0f + bodyHeight + bob);
+            glEnd();
+
+            glColor3f(0.72f, 0.23f, 0.16f);
+            glBegin(GL_POLYGON);
+            glVertex2f(left + 52.0f, baseY + 35.0f + bob);
+            glVertex2f(left + 106.0f, baseY + 3.0f + bob);
+            glVertex2f(right - 98.0f, baseY + 3.0f + bob);
+            glVertex2f(right - 34.0f, baseY + 35.0f + bob);
+            glEnd();
+
+            glColor3f(0.58f, 0.84f, 0.95f);
+            glBegin(GL_QUADS);
+            glVertex2f(left + 110.0f, baseY + 10.0f + bob);
+            glVertex2f(right - 103.0f, baseY + 10.0f + bob);
+            glVertex2f(right - 78.0f, baseY + 31.0f + bob);
+            glVertex2f(left + 89.0f, baseY + 31.0f + bob);
+            glEnd();
+
+            glColor3f(0.95f, 0.90f, 0.64f);
+            glBegin(GL_QUADS);
+            glVertex2f(right - 14.0f, baseY + 53.0f + bob);
+            glVertex2f(right + 4.0f, baseY + 53.0f + bob);
+            glVertex2f(right + 4.0f, baseY + 68.0f + bob);
+            glVertex2f(right - 14.0f, baseY + 68.0f + bob);
+            glEnd();
+
+            glColor3f(0.78f, 0.15f, 0.14f);
+            glBegin(GL_QUADS);
+            glVertex2f(left - 4.0f, baseY + 54.0f + bob);
+            glVertex2f(left + 10.0f, baseY + 54.0f + bob);
+            glVertex2f(left + 10.0f, baseY + 67.0f + bob);
+            glVertex2f(left - 4.0f, baseY + 67.0f + bob);
+            glEnd();
+
+            glColor3f(0.08f, 0.08f, 0.08f);
+            graphics::drawFilledCircle({left + 70.0f, baseY + 95.0f + bob}, 19.0f, 30);
+            graphics::drawFilledCircle({right - 68.0f, baseY + 95.0f + bob}, 19.0f, 30);
+            glColor3f(0.78f, 0.80f, 0.84f);
+            graphics::drawFilledCircle({left + 70.0f, baseY + 95.0f + bob}, 7.0f, 20);
+            graphics::drawFilledCircle({right - 68.0f, baseY + 95.0f + bob}, 7.0f, 20);
+        }
+
+        void drawDetailedNpc(float x, float y, float walkSwing)
+        {
+            glColor3f(0.95f, 0.79f, 0.61f);
+            graphics::drawFilledCircle({x, y + 12.0f}, 13.0f, 28);
+
+            glColor3f(0.17f, 0.20f, 0.25f);
+            graphics::drawFilledCircle({x, y + 6.0f}, 12.0f, 28);
+
+            glColor3f(0.21f, 0.58f, 0.86f);
+            glBegin(GL_QUADS);
+            glVertex2f(x - 15.0f, y + 24.0f);
+            glVertex2f(x + 15.0f, y + 24.0f);
+            glVertex2f(x + 19.0f, y + 84.0f);
+            glVertex2f(x - 19.0f, y + 84.0f);
+            glEnd();
+
+            glColor3f(0.95f, 0.79f, 0.61f);
+            glBegin(GL_QUADS);
+            glVertex2f(x - 26.0f, y + 34.0f);
+            glVertex2f(x - 16.0f, y + 34.0f);
+            glVertex2f(x - 20.0f - walkSwing * 0.35f, y + 66.0f);
+            glVertex2f(x - 31.0f - walkSwing * 0.35f, y + 66.0f);
+            glEnd();
+
+            glBegin(GL_QUADS);
+            glVertex2f(x + 16.0f, y + 34.0f);
+            glVertex2f(x + 26.0f, y + 34.0f);
+            glVertex2f(x + 31.0f + walkSwing * 0.35f, y + 66.0f);
+            glVertex2f(x + 20.0f + walkSwing * 0.35f, y + 66.0f);
+            glEnd();
+
+            glColor3f(0.10f, 0.12f, 0.16f);
+            glBegin(GL_QUADS);
+            glVertex2f(x - 10.0f, y + 84.0f);
+            glVertex2f(x - 3.0f, y + 84.0f);
+            glVertex2f(x - 1.0f + walkSwing, y + 120.0f);
+            glVertex2f(x - 12.0f + walkSwing, y + 120.0f);
+            glEnd();
+
+            glBegin(GL_QUADS);
+            glVertex2f(x + 3.0f, y + 84.0f);
+            glVertex2f(x + 10.0f, y + 84.0f);
+            glVertex2f(x + 12.0f - walkSwing, y + 120.0f);
+            glVertex2f(x + 1.0f - walkSwing, y + 120.0f);
+            glEnd();
+        }
     } // namespace
 
     App *App::instance_ = nullptr;
+
+    App::~App()
+    {
+        stopIntroMusic();
+    }
 
     bool App::initialize(int &argc, char **argv)
     {
@@ -74,6 +209,7 @@ namespace civitasx
         introStartedSeconds_ = lastTimeSeconds_;
         introLoadProgress_ = 0.0f;
         simulationStarted_ = false;
+        startIntroMusic();
         return true;
     }
 
@@ -121,6 +257,7 @@ namespace civitasx
             if (introLoadProgress_ >= 1.0f && engine::consumeStartPressed())
             {
                 simulationStarted_ = true;
+                stopIntroMusic();
             }
 
             drawStartScreen(elapsed);
@@ -130,6 +267,24 @@ namespace civitasx
 
         renderer_.render(width_, height_);
         glutSwapBuffers();
+    }
+
+    void App::startIntroMusic()
+    {
+#ifdef _WIN32
+        // Placeholder behavior: once you upload this WAV file, it will auto-loop on the start screen.
+        if (std::filesystem::exists(kIntroMusicFilePath))
+        {
+            PlaySoundA(kIntroMusicFilePath, nullptr, SND_FILENAME | SND_ASYNC | SND_LOOP | SND_NODEFAULT);
+        }
+#endif
+    }
+
+    void App::stopIntroMusic()
+    {
+#ifdef _WIN32
+        PlaySoundA(nullptr, nullptr, SND_ASYNC);
+#endif
     }
 
     void App::onReshape(int width, int height)
@@ -223,94 +378,24 @@ namespace civitasx
             glEnd();
         }
 
-        // Stylized animated car.
-        const float carX = std::fmod(elapsedSeconds * 175.0f, w + 280.0f) - 240.0f;
-        const float carY = h * 0.83f;
-        const float carBounce = std::sin(elapsedSeconds * 8.0f) * 2.5f;
+        // Car moves forward and wraps around after leaving the right side.
+        const float carLoopX = std::fmod(elapsedSeconds * 185.0f, w + 500.0f) - 260.0f;
+        const float carY = h * 0.77f;
+        const float carBounce = std::sin(elapsedSeconds * 8.0f) * 2.1f;
+        drawDetailedCar(carLoopX, carY, carBounce);
 
-        glColor3f(0.86f, 0.30f, 0.20f);
-        glBegin(GL_QUADS);
-        glVertex2f(carX + 20.0f, carY + 42.0f + carBounce);
-        glVertex2f(carX + 190.0f, carY + 42.0f + carBounce);
-        glVertex2f(carX + 190.0f, carY + 88.0f + carBounce);
-        glVertex2f(carX + 20.0f, carY + 88.0f + carBounce);
-        glEnd();
-
-        glColor3f(0.70f, 0.22f, 0.15f);
-        glBegin(GL_POLYGON);
-        glVertex2f(carX + 54.0f, carY + 42.0f + carBounce);
-        glVertex2f(carX + 102.0f, carY + 12.0f + carBounce);
-        glVertex2f(carX + 154.0f, carY + 12.0f + carBounce);
-        glVertex2f(carX + 186.0f, carY + 42.0f + carBounce);
-        glEnd();
-
-        glColor3f(0.60f, 0.83f, 0.93f);
-        glBegin(GL_QUADS);
-        glVertex2f(carX + 104.0f, carY + 18.0f + carBounce);
-        glVertex2f(carX + 150.0f, carY + 18.0f + carBounce);
-        glVertex2f(carX + 165.0f, carY + 41.0f + carBounce);
-        glVertex2f(carX + 90.0f, carY + 41.0f + carBounce);
-        glEnd();
-
-        glColor3f(0.08f, 0.08f, 0.08f);
-        for (int i = 0; i < 2; ++i)
-        {
-            const float wheelX = carX + (i == 0 ? 60.0f : 154.0f);
-            const float wheelY = carY + 93.0f + carBounce;
-            glBegin(GL_TRIANGLE_FAN);
-            glVertex2f(wheelX, wheelY);
-            for (int seg = 0; seg <= 24; ++seg)
-            {
-                const float a = static_cast<float>(seg) * 0.2617994f;
-                glVertex2f(wheelX + (13.0f * std::cos(a)), wheelY + (13.0f * std::sin(a)));
-            }
-            glEnd();
-        }
-
-        // Stylized NPC silhouette with subtle walk loop.
-        const float npcX = w * 0.72f + (std::sin(elapsedSeconds * 2.0f) * 18.0f);
-        const float npcY = h * 0.69f;
-        const float step = std::sin(elapsedSeconds * 7.2f) * 7.0f;
-
-        glColor3f(0.94f, 0.78f, 0.60f);
-        glBegin(GL_TRIANGLE_FAN);
-        glVertex2f(npcX, npcY + 16.0f);
-        for (int seg = 0; seg <= 22; ++seg)
-        {
-            const float a = static_cast<float>(seg) * 0.285599f;
-            glVertex2f(npcX + (12.0f * std::cos(a)), npcY + 16.0f + (12.0f * std::sin(a)));
-        }
-        glEnd();
-
-        glColor3f(0.20f, 0.55f, 0.83f);
-        glBegin(GL_QUADS);
-        glVertex2f(npcX - 10.0f, npcY + 30.0f);
-        glVertex2f(npcX + 10.0f, npcY + 30.0f);
-        glVertex2f(npcX + 14.0f, npcY + 84.0f);
-        glVertex2f(npcX - 14.0f, npcY + 84.0f);
-        glEnd();
-
-        glColor3f(0.09f, 0.11f, 0.15f);
-        glBegin(GL_QUADS);
-        glVertex2f(npcX - 8.0f, npcY + 84.0f);
-        glVertex2f(npcX - 2.0f, npcY + 84.0f);
-        glVertex2f(npcX - 3.0f + step, npcY + 116.0f);
-        glVertex2f(npcX - 12.0f + step, npcY + 116.0f);
-        glEnd();
-
-        glBegin(GL_QUADS);
-        glVertex2f(npcX + 2.0f, npcY + 84.0f);
-        glVertex2f(npcX + 8.0f, npcY + 84.0f);
-        glVertex2f(npcX + 12.0f - step, npcY + 116.0f);
-        glVertex2f(npcX + 3.0f - step, npcY + 116.0f);
-        glEnd();
+        // NPC with more detail using shape utility circles.
+        const float npcX = w * 0.76f + (std::sin(elapsedSeconds * 2.0f) * 22.0f);
+        const float npcY = h * 0.58f;
+        const float step = std::sin(elapsedSeconds * 7.0f) * 7.5f;
+        drawDetailedNpc(npcX, npcY, step);
 
         const float centerX = w * 0.5f;
-        const float titleY = h * 0.26f;
-        const float panelWidth = std::min(700.0f, w * 0.84f);
+        const float titleY = h * 0.24f;
+        const float panelWidth = std::min(860.0f, w * 0.90f);
         const float panelLeft = centerX - (panelWidth * 0.5f);
-        const float panelTop = h * 0.12f;
-        const float panelBottom = h * 0.52f;
+        const float panelTop = h * 0.09f;
+        const float panelBottom = h * 0.56f;
 
         glColor4f(0.02f, 0.05f, 0.08f, 0.78f);
         glBegin(GL_QUADS);
@@ -329,15 +414,16 @@ namespace civitasx
         glEnd();
 
         glColor3f(0.93f, 0.97f, 0.99f);
-        drawCenteredText(centerX, titleY, "CIVITAS-X", GLUT_BITMAP_TIMES_ROMAN_24);
+        drawCenteredStrokeText(centerX, titleY, "CIVITAS-X", 0.43f);
 
         glColor3f(0.67f, 0.84f, 0.91f);
-        drawCenteredText(centerX, titleY + 34.0f, "Autonomous City Simulation", GLUT_BITMAP_HELVETICA_18);
+        const float subtitleY = titleY + 52.0f;
+        drawCenteredText(centerX, subtitleY, "Autonomous City Simulation", GLUT_BITMAP_HELVETICA_18);
 
         const float barWidth = std::min(620.0f, w * 0.70f);
         const float barHeight = 26.0f;
         const float barX = centerX - (barWidth * 0.5f);
-        const float barY = h * 0.40f;
+        const float barY = h * 0.43f;
 
         glColor3f(0.08f, 0.14f, 0.17f);
         glBegin(GL_QUADS);
@@ -364,7 +450,8 @@ namespace civitasx
         {
             const float blink = 0.35f + (0.65f * (0.5f + (0.5f * std::sin(elapsedSeconds * 4.4f))));
             glColor3f(0.97f * blink, 0.97f * blink, 0.97f * blink);
-            drawCenteredText(centerX, barY + 86.0f, "Press Enter to Start", GLUT_BITMAP_HELVETICA_18);
+            const float pressEnterY = subtitleY + ((barY - subtitleY) * 0.52f);
+            drawCenteredText(centerX, pressEnterY, "Press Enter to Start", GLUT_BITMAP_HELVETICA_18);
         }
     }
 

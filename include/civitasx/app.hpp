@@ -8,6 +8,7 @@ namespace civitasx
     class App
     {
     public:
+        ~App();
         bool initialize(int &argc, char **argv);
         void run();
 
@@ -22,6 +23,8 @@ namespace civitasx
         void onReshape(int width, int height);
         void onIdle();
         void drawStartScreen(float elapsedSeconds) const;
+        void startIntroMusic();
+        void stopIntroMusic();
 
         int width_ = 1280;
         int height_ = 720;

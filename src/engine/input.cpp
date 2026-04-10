@@ -51,10 +51,10 @@ namespace civitasx
 
             constexpr float kMinZoom = 0.45f;
             constexpr float kMaxZoom = 4.0f;
-            constexpr float kKeyboardPanSpeed = 700.0f;  // lower = gentler tap-panning
+            constexpr float kKeyboardPanSpeed = 700.0f; // lower = gentler tap-panning
             constexpr float kMousePanSpeed = 850.0f;
-            constexpr float kVelocitySmoothing = 16.0f;  // raised: snappier settle, no lag
-            constexpr float kZoomSmoothing = 18.0f;      // raised: zoom feels instant but smooth
+            constexpr float kVelocitySmoothing = 16.0f; // raised: snappier settle, no lag
+            constexpr float kZoomSmoothing = 18.0f;     // raised: zoom feels instant but smooth
             constexpr float kMouseDeadZone = 0.08f;
 
             float signPreservingDeadZone(float value)

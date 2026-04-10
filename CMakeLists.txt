@@ -55,6 +55,10 @@ else()
     target_link_libraries(civitas_x PRIVATE ${GLUT_LIBRARIES})
 endif()
 
+if(WIN32)
+    target_link_libraries(civitas_x PRIVATE winmm)
+endif()
+
 if(glm_FOUND)
     target_link_libraries(civitas_x PRIVATE glm::glm)
 else()
