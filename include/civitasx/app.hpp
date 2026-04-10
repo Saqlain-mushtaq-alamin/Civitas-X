@@ -21,10 +21,14 @@ namespace civitasx
         void onDisplay();
         void onReshape(int width, int height);
         void onIdle();
+        void drawStartScreen(float elapsedSeconds) const;
 
         int width_ = 1280;
         int height_ = 720;
         float lastTimeSeconds_ = 0.0f;
+        float introStartedSeconds_ = 0.0f;
+        float introLoadProgress_ = 0.0f;
+        bool simulationStarted_ = false;
         engine::Renderer renderer_;
     };
 

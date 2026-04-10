@@ -29,6 +29,7 @@ namespace civitasx
                 bool hasPendingLeftClick = false;
                 int clickX = 0;
                 int clickY = 0;
+                bool hasPendingStartPress = false;
 
                 float velocityX = 0.0f;
                 float velocityY = 0.0f;
@@ -95,6 +96,9 @@ namespace civitasx
             {
                 switch (key)
                 {
+                case 13:
+                    g_navigation.hasPendingStartPress = true;
+                    return true;
                 case 'q':
                 case 'Q':
                     g_navigation.paused = !g_navigation.paused;
@@ -436,6 +440,17 @@ namespace civitasx
             x = g_navigation.clickX;
             y = g_navigation.clickY;
             g_navigation.hasPendingLeftClick = false;
+            return true;
+        }
+
+        bool consumeStartPressed()
+        {
+            if (!g_navigation.hasPendingStartPress)
+            {
+                return false;
+            }
+
+            g_navigation.hasPendingStartPress = false;
             return true;
         }
 

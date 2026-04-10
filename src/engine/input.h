@@ -17,6 +17,7 @@ namespace civitasx
         void updateNavigation(int viewportWidth, int viewportHeight, int mapWidthPixels, int mapHeightPixels);
         CameraState cameraState();
         bool consumeLeftClick(int &x, int &y);
+        bool consumeStartPressed();
 
     } // namespace engine
 
