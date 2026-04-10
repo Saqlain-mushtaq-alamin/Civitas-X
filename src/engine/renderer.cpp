@@ -597,21 +597,45 @@ namespace civitasx
                 return bestNode;
             }
 
-            void moveCarTowardTarget(agents::CarAgent &car, const glm::vec2 &target, float deltaSeconds)
+            bool assignRouteToNode(std::size_t carIndex, int startNode, int goalNode)
             {
-                const glm::vec2 toTarget = target - car.position;
-                const float distance = glm::length(toTarget);
-                if (distance <= 0.0001f)
+                if (carIndex >= g_carRuntime.cars.size() ||
+                    startNode < 0 ||
+                    goalNode < 0 ||
+                    startNode >= static_cast<int>(g_carRuntime.graph.nodeCenters.size()) ||
+                    goalNode >= static_cast<int>(g_carRuntime.graph.nodeCenters.size()))
                 {
-                    car.currentSpeed = 0.0f;
-                    return;
+                    return false;
                 }
 
-                const glm::vec2 direction = toTarget / distance;
-                car.angle = std::atan2(direction.y, direction.x);
-                car.currentSpeed = car.speed;
-                const float step = std::min(car.currentSpeed * deltaSeconds, distance);
-                car.position += direction * step;
+                std::vector<int> path;
+                if (startNode == goalNode)
+                {
+                    path.push_back(startNode);
+                }
+                else
+                {
+                    path = ai::findPathAStar(g_carRuntime.graph, startNode, goalNode);
+                    if (path.empty())
+                    {
+                        return false;
+                    }
+                }
+
+                g_carRuntime.currentNodeByCar[carIndex] = startNode;
+                g_carRuntime.routeByCar[carIndex] = path;
+                g_carRuntime.routeStepByCar[carIndex] = 0U;
+
+                agents::CarAgent &car = g_carRuntime.cars[carIndex];
+                if (path.size() >= 2U)
+                {
+                    car.target = g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(path[1])];
+                }
+                else
+                {
+                    car.target = g_carRuntime.graph.nodeCenters[static_cast<std::size_t>(startNode)];
+                }
+                return true;
             }
 
             void updateCars(float deltaSeconds, const world::CityMap &map, int tilePixels, float simulationSeconds)
@@ -623,77 +647,53 @@ namespace civitasx
 
                 const float laneOffset = 2.2f;
                 const float reachThreshold = 0.75f;
-                const float pickupReachThreshold = 2.0f;
-                const float dropoffReachThreshold = 1.5f;
+
+                auto completeTransport = [&](std::size_t carIndex, int currentNode)
+                {
+                    agents::CarAgent &carRef = g_carRuntime.cars[carIndex];
+
+                    for (agents::NpcAgent &npc : g_npcRuntime.npcs)
+                    {
+                        if (npc.id == carRef.passengerNpcId)
+                        {
+                            npc.position = carRef.position;
+                            npc.state = agents::NpcState::Walking;
+                            npc.assignedCarId = -1;
+                            npc.isRentingCar = false;
+                            npc.rentedCarId = -1;
+                            break;
+                        }
+                    }
+
+                    carRef.state = agents::CarState::Free;
+                    carRef.passengerNpcId = -1;
+                    carRef.renterNpcId = -1;
+                    carRef.isRented = false;
+
+                    if (currentNode < 0 || currentNode >= static_cast<int>(g_carRuntime.graph.nodeCenters.size()))
+                    {
+                        currentNode = findClosestRoadNode(carRef.position);
+                    }
+
+                    if (currentNode >= 0)
+                    {
+                        g_carRuntime.currentNodeByCar[carIndex] = currentNode;
+                        assignRouteForCar(carIndex, currentNode);
+                    }
+                };
+
                 for (std::size_t i = 0; i < g_carRuntime.cars.size(); ++i)
                 {
                     agents::CarAgent &car = g_carRuntime.cars[i];
 
-                    // Ride service states bypass roaming route-following behavior.
-                    if (car.state == agents::CarState::GoToPickup)
+                    if (car.state == agents::CarState::Assigned)
                     {
-                        car.target = car.pickupLocation;
-                        moveCarTowardTarget(car, car.pickupLocation, deltaSeconds);
-                        if (glm::distance(car.position, car.pickupLocation) <= pickupReachThreshold)
-                        {
-                            car.position = car.pickupLocation;
-                            car.state = agents::CarState::WaitForNpc;
-                            car.currentSpeed = 0.0f;
-                        }
-                        continue;
+                        car.state = agents::CarState::GoToPickup;
                     }
 
                     if (car.state == agents::CarState::WaitForNpc)
                     {
                         car.currentSpeed = 0.0f;
-                        continue;
-                    }
-
-                    if (car.state == agents::CarState::Transporting)
-                    {
-                        car.target = car.destination;
-                        moveCarTowardTarget(car, car.destination, deltaSeconds);
-
-                        for (agents::NpcAgent &npc : g_npcRuntime.npcs)
-                        {
-                            if (npc.id == car.passengerNpcId)
-                            {
-                                npc.position = car.position;
-                                break;
-                            }
-                        }
-
-                        if (glm::distance(car.position, car.destination) <= dropoffReachThreshold)
-                        {
-                            car.position = car.destination;
-
-                            for (agents::NpcAgent &npc : g_npcRuntime.npcs)
-                            {
-                                if (npc.id == car.passengerNpcId)
-                                {
-                                    npc.position = car.destination;
-                                    npc.state = agents::NpcState::Arrived;
-                                    npc.assignedCarId = -1;
-                                    npc.isRentingCar = false;
-                                    npc.rentedCarId = -1;
-                                    break;
-                                }
-                            }
-
-                            car.state = agents::CarState::Free;
-                            car.passengerNpcId = -1;
-                            car.renterNpcId = -1;
-                            car.isRented = false;
-                            car.pickupLocation = car.position;
-                            car.destination = car.position;
-
-                            int restartNode = findClosestRoadNode(car.position);
-                            if (restartNode >= 0)
-                            {
-                                g_carRuntime.currentNodeByCar[i] = restartNode;
-                                assignRouteForCar(i, restartNode);
-                            }
-                        }
                         continue;
                     }
 
@@ -708,20 +708,53 @@ namespace civitasx
                         g_carRuntime.currentNodeByCar[i] = currentNode;
                     }
 
-                    if (car.state != agents::CarState::Free)
-                    {
-                        continue;
-                    }
+                    const bool isServiceTrip =
+                        (car.state == agents::CarState::GoToPickup) ||
+                        (car.state == agents::CarState::Transporting);
 
                     std::vector<int> &route = g_carRuntime.routeByCar[i];
                     std::size_t &routeStep = g_carRuntime.routeStepByCar[i];
-                    if (route.size() < 2U || routeStep + 1U >= route.size())
+
+                    int serviceGoalNode = -1;
+                    if (isServiceTrip)
                     {
-                        assignRouteForCar(i, currentNode);
+                        const glm::vec2 serviceGoal =
+                            (car.state == agents::CarState::GoToPickup) ? car.pickupLocation : car.destination;
+                        serviceGoalNode = findClosestRoadNode(serviceGoal);
+                    }
+
+                    const bool routeInvalid = (route.size() < 2U || routeStep + 1U >= route.size());
+                    const bool wrongServiceGoal =
+                        (isServiceTrip && serviceGoalNode >= 0 && route.size() >= 1U && route.back() != serviceGoalNode);
+                    if (routeInvalid || wrongServiceGoal)
+                    {
+                        if (isServiceTrip)
+                        {
+                            if (serviceGoalNode >= 0)
+                            {
+                                assignRouteToNode(i, currentNode, serviceGoalNode);
+                            }
+                        }
+                        else
+                        {
+                            assignRouteForCar(i, currentNode);
+                        }
                     }
 
                     if (route.size() < 2U || routeStep + 1U >= route.size())
                     {
+                        if (isServiceTrip)
+                        {
+                            if (car.state == agents::CarState::GoToPickup)
+                            {
+                                car.state = agents::CarState::WaitForNpc;
+                                car.currentSpeed = 0.0f;
+                            }
+                            else
+                            {
+                                completeTransport(i, currentNode);
+                            }
+                        }
                         continue;
                     }
 
@@ -742,6 +775,20 @@ namespace civitasx
 
                         if (routeStep + 1U >= route.size())
                         {
+                            if (isServiceTrip)
+                            {
+                                if (car.state == agents::CarState::GoToPickup)
+                                {
+                                    car.state = agents::CarState::WaitForNpc;
+                                    car.currentSpeed = 0.0f;
+                                }
+                                else
+                                {
+                                    completeTransport(i, currentNode);
+                                }
+                                continue;
+                            }
+
                             assignRouteForCar(i, currentNode);
                             if (g_carRuntime.routeByCar[i].size() < 2U || g_carRuntime.routeStepByCar[i] + 1U >= g_carRuntime.routeByCar[i].size())
                             {
@@ -1139,6 +1186,15 @@ namespace civitasx
                                 npc.rideRequested = true;
                             }
                             continue;
+                        }
+
+                        const glm::vec2 toCar = assignedCar->position - npc.position;
+                        const float distanceToCar = glm::length(toCar);
+                        if (distanceToCar > pickupDistance && distanceToCar > 0.0001f)
+                        {
+                            const glm::vec2 direction = toCar / distanceToCar;
+                            const float step = std::min(walkSpeed * deltaSeconds, distanceToCar);
+                            npc.position += direction * step;
                         }
 
                         if (assignedCar->state == agents::CarState::WaitForNpc && glm::distance(assignedCar->position, npc.position) <= pickupDistance)
