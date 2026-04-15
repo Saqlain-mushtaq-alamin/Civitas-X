@@ -1,0 +1,21 @@
+# ninja log v7
+65	600	7975473467515809	CMakeFiles/civitas_x.dir/src/main.cpp.obj	c9d0f45e4d8e5bfb
+108	766	7975473467935017	CMakeFiles/civitas_x.dir/src/world/city_map.cpp.obj	8333bc5933b64fbf
+146	886	7975473468318303	CMakeFiles/civitas_x.dir/src/agents/car_agent.cpp.obj	b0cd0e59bdda6586
+135	1139	7975473468203524	CMakeFiles/civitas_x.dir/src/world/tile_system.cpp.obj	be51c75c3331ffec
+122	1417	7975473468078900	CMakeFiles/civitas_x.dir/src/world/road_network.cpp.obj	5f060a237592fdaa
+155	1930	7975473468416480	CMakeFiles/civitas_x.dir/src/agents/npc_agent.cpp.obj	a6ffdf0f35b8a0db
+768	1951	7975473474525817	CMakeFiles/civitas_x.dir/src/ai/behavior_system.cpp.obj	6509b75cd352e2fa
+890	1988	7975473475770587	CMakeFiles/civitas_x.dir/src/ai/decision_logic.cpp.obj	4083aae3e3abe9ca
+1431	2651	7975473481300417	CMakeFiles/civitas_x.dir/src/systems/economy_system.cpp.obj	4b579a516e0df14e
+89	2971	7975473467749600	CMakeFiles/civitas_x.dir/src/engine/camera.cpp.obj	8149a27bcc277cdc
+1143	2989	7975473478449596	CMakeFiles/civitas_x.dir/src/systems/traffic_system.cpp.obj	8fc0173759e34081
+99	3493	7975473467840021	CMakeFiles/civitas_x.dir/src/engine/input.cpp.obj	9abab8aab2f0af31
+2652	3545	7975473493624580	CMakeFiles/civitas_x.dir/src/graphics/transformation.cpp.obj	812553170b3d1b49
+604	3891	7975473473092195	CMakeFiles/civitas_x.dir/src/ai/pathfinding.cpp.obj	90bfc9a1834a7c7a
+2001	4014	7975473486956579	CMakeFiles/civitas_x.dir/src/graphics/algorithms.cpp.obj	6187073da86c146b
+1961	4677	7975473486463606	CMakeFiles/civitas_x.dir/src/graphics/shape_drawer.cpp.obj	750f0c4a058fe87e
+1937	4819	7975473486275948	CMakeFiles/civitas_x.dir/src/systems/simulation_manager.cpp.obj	43a42e087625db22
+73	4839	7975473467572751	CMakeFiles/civitas_x.dir/src/app.cpp.obj	e5ac29d62abb7d49
+81	7381	7975473467648116	CMakeFiles/civitas_x.dir/src/engine/renderer.cpp.obj	95aab209f35d3ca1
+7382	7791	7975473540606572	civitas_x.exe	8da60a2c5a80b90
