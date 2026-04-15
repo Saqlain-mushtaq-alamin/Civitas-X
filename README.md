@@ -96,6 +96,4 @@ Civitas-X/
   vcpkg.json
 ```
 
-## Current Status
-- Starter simulation loop is implemented for **Phase 1**.
-- Cars move autonomously between waypoints with basic energy usage.
+ 

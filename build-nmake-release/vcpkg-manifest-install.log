@@ -1,0 +1,58 @@
+Detecting compiler hash for triplet x64-windows...
+Compiler found: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe
+The following packages will be built and installed:
+  * egl-registry:x64-windows@2025-05-27
+    freeglut:x64-windows@3.8.0
+    glm:x64-windows@1.0.3
+  * opengl:x64-windows@2022-12-04#3
+  * opengl-registry:x64-windows@2026-01-26
+  * vcpkg-cmake:x64-windows@2024-04-23
+  * vcpkg-cmake-config:x64-windows@2024-05-23
+Additional packages (*) will be modified to complete this operation.
+Restored 7 package(s) from C:\Users\Admin\AppData\Local\vcpkg\archives in 451 ms. Use --debug to see more details.
+Installing 1/7 vcpkg-cmake-config:x64-windows@2024-05-23...
+vcpkg-cmake-config:x64-windows@2024-05-23 package ABI: 403c197d58ee03127694340aba581271dbf9b345a8d9c36516b1e1605d9c31eb
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 4.09 ms
+Installing 2/7 vcpkg-cmake:x64-windows@2024-04-23...
+vcpkg-cmake:x64-windows@2024-04-23 package ABI: a833a92c1f4242242721248fb8bbe4757fe70a216069283572d3bbf00d0a2481
+Elapsed time to handle vcpkg-cmake:x64-windows: 8.49 ms
+Installing 3/7 egl-registry:x64-windows@2025-05-27...
+egl-registry:x64-windows@2025-05-27 package ABI: 8980229bb33f3bde84ab8817e839cd46194e55c5e562e239cd396b524bb48f6b
+Elapsed time to handle egl-registry:x64-windows: 8.6 ms
+Installing 4/7 opengl-registry:x64-windows@2026-01-26...
+opengl-registry:x64-windows@2026-01-26 package ABI: 00c0ee2313309e4d0421c40cb52ba17a2958c30baa4d6fed14f363db4b92ad1a
+Elapsed time to handle opengl-registry:x64-windows: 13.1 ms
+Installing 5/7 opengl:x64-windows@2022-12-04#3...
+opengl:x64-windows@2022-12-04#3 package ABI: 0249d708c6d70edf0cc1294bfd62ca14a20376d302b2b544f38118cd236ad1af
+Elapsed time to handle opengl:x64-windows: 11.2 ms
+Installing 6/7 freeglut:x64-windows@3.8.0...
+freeglut:x64-windows@3.8.0 package ABI: 2e29ad01e41c3a3d0717f758cb21ed00c579b063025e407232de6a968fc99780
+Elapsed time to handle freeglut:x64-windows: 11.2 ms
+Installing 7/7 glm:x64-windows@1.0.3...
+glm:x64-windows@1.0.3 package ABI: aafb7d4987d53950a6eca0ba819d3b8f9ccd0879d7031c4afac5dae78bbabc49
+Elapsed time to handle glm:x64-windows: 108 ms
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Some packages did not declare an SPDX license. Check the `copyright` file for each package for more information about their licensing.
+Packages installed in this vcpkg installation declare the following licenses:
+Apache-2.0
+MIT
+freeglut provides CMake targets:
+
+    find_package(FreeGLUT CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:FreeGLUT::freeglut>,FreeGLUT::freeglut,FreeGLUT::freeglut_static>)
+
+freeglut is compatible with built-in CMake targets:
+
+    find_package(GLUT REQUIRED)
+    target_link_libraries(main PRIVATE GLUT::GLUT)
+
+The package glm provides CMake targets:
+
+    find_package(glm CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE glm::glm)
+
+    # Or use the header-only version
+    find_package(glm CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE glm::glm-header-only)
+
+All requested installations completed successfully in: 170 ms
